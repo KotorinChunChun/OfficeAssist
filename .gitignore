@@ -1,0 +1,10 @@
+bin/
+obj/
+artifacts/
+release/
+*.log
+/dev/history/*/logs/
+.env*
+*.pfx
+*.pem
+*.key
