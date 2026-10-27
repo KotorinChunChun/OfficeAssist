@@ -8,7 +8,7 @@ dotnet build src/OfficeAssist/OfficeAssist.csproj
 dotnet run --project src/OfficeAssist/OfficeAssist.csproj
 ```
 
-管理用ビルドは`dotnet build src/OfficeAssist/OfficeAssist.csproj --artifacts-path artifacts/management`です。`--startup`を付けると画面を表示せず常駐します。手動の二重起動は既存画面を表示し、無表示の二重起動では画面を開きません。
+管理用ビルドは`dotnet build src/OfficeAssist/OfficeAssist.csproj --artifacts-path artifacts/management`です。通常起動と`--startup`はいずれも画面を表示せず常駐します。二重起動では既存画面を開かずに終了します。管理窓口の`show`または通知領域メニューの「開く」で画面を表示できます。この通常起動は利用者の2026-10-28の明示指示による共通起動規約の例外です。
 
 管理窓口はKotorinToys管理契約2（status/show/stop）です。Integration/ManagementEndpoint.csは親のcontracts/ManagementEndpoint.Resilient.csのコピーです。独自アイコンは`src/OfficeAssist/assets/`に同梱しており、親リポジトリがなくてもビルドできます。
 

@@ -10,7 +10,7 @@ internal sealed class TrayContext : ApplicationContext
     readonly ContextMenuStrip menu = new();
     readonly ManagementEndpoint endpoint;
     readonly ExcelDropService dropService;
-    public TrayContext(bool silent)
+    public TrayContext()
     {
         _ = window.Handle;
         var toggle = new ToolStripMenuItem("Excelへの画像ドロップ") { Checked = true, CheckOnClick = true };
@@ -31,10 +31,8 @@ internal sealed class TrayContext : ApplicationContext
             dropService.Enabled = enabled;
             window.SetResult(enabled ? "待機中" : "一時停止中");
         };
-        window.ExitRequested += Stop;
         endpoint = new ManagementEndpoint("office-assist", window, ShowWindow, Stop,
             () => dropService.Busy ? "画像を挿入中です。" : null);
-        if (!silent) ShowWindow();
     }
 
     void ShowWindow()
