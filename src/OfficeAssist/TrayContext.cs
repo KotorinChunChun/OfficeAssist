@@ -24,7 +24,6 @@ internal sealed class TrayContext : ApplicationContext
         dropService = new ExcelDropService(window, (message, failed) =>
         {
             window.SetResult(message);
-            tray.ShowBalloonTip(4000, "OfficeAssist", message, failed ? ToolTipIcon.Warning : ToolTipIcon.Info);
         });
         window.FeatureChanged += enabled =>
         {
