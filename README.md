@@ -12,6 +12,10 @@ Officeをカスタマイズして便利に使うためのWindows用常駐アプ�
 
 通知領域のアイコンを右クリックすると、一時停止・画面表示・終了ができます。Windowsへの自動起動登録は行いません。
 
+## インストール
+
+[GitHub Releases](https://github.com/KotorinChunChun/OfficeAssist/releases)からセットアップファイルをダウンロードして実行します。利用には.NET Desktop Runtime 10 x64が必要です。
+
 ## 対応環境
 
 Windows 11 x64、.NET Desktop Runtime 10 x64、インストール済みのデスクトップ版Microsoft Excelが必要です。ExcelとOfficeAssistは通常権限で実行してください。Web版Excelは対象外です。
