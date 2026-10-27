@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "office-assist",
+  "name": "OfficeAssist",
+  "version": "0.1.0",
+  "summary": "Office操作を補助し、Excelへ画像をドラッグ＆ドロップで挿入する",
+  "category": "Office・操作補助",
+  "executable": "artifacts/management/bin/OfficeAssist/debug/OfficeAssist.exe",
+  "installedExecutable": "OfficeAssist.exe",
+  "appId": "KotorinToys.OfficeAssist",
+  "manual": "docs/guide.md",
+  "readme": "README.md",
+  "distributionStatus": "unpublished",
+  "supportedEnvironment": "windows11-x64",
+  "investigationStatus": "confirmed",
+  "capabilities": ["status", "show", "stop", "silent-start"],
+  "runtimes": [
+    {
+      "id": "dotnet-desktop",
+      "name": ".NET Desktop Runtime 10 (x64)",
+      "kind": "dotnet-desktop",
+      "major": 10,
+      "guide": "開発には.NET 10 SDK、実行には.NET Desktop Runtime 10 x64が必要です。"
+    },
+    {
+      "id": "excel",
+      "name": "デスクトップ版Microsoft Excel",
+      "kind": "external",
+      "optional": true,
+      "feature": "Excelへの画像ドロップ",
+      "guide": "画像挿入にはインストール済みのデスクトップ版Excelを通常権限で起動してください。Web版は対象外です。"
+    }
+  ]
+}
