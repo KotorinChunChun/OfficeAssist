@@ -1,6 +1,6 @@
 # OfficeAssist
 
-Officeの操作を補助するWindows用の常駐アプリです。
+Officeをカスタマイズして便利に使うためのWindows用常駐アプリです。
 
 ## Excelへ画像を挿入する
 
