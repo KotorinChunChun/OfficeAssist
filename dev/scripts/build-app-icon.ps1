@@ -19,7 +19,8 @@ try {
             $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
             $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-            $graphics.DrawImage($sourceImage,[System.Drawing.Rectangle]::new(0,0,$size,$size),0,0,$sourceImage.Width,$sourceImage.Height,[System.Drawing.GraphicsUnit]::Pixel)
+            # マスターの透明な余白を調整し、16pxでも図柄を大きく保つ。
+            $graphics.DrawImage($sourceImage,[System.Drawing.Rectangle]::new(0,0,$size,$size),180,185,894,894,[System.Drawing.GraphicsUnit]::Pixel)
             # 全サイズを32bit DIBとANDマスクで保存し、アルファ透過と従来のマスクを両立する。
                 $writer = [IO.BinaryWriter]::new($stream,[Text.Encoding]::UTF8,$true)
                 try {

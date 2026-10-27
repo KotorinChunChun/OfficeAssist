@@ -12,7 +12,7 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj
 
 管理窓口はKotorinToys管理契約2（status/show/stop）です。Integration/ManagementEndpoint.csは親のcontracts/ManagementEndpoint.Resilient.csのコピーです。独自アイコンは`src/OfficeAssist/assets/`に同梱しており、親リポジトリがなくてもビルドできます。
 
-独自アイコンのマスターは`src/OfficeAssist/assets/OfficeAssist.png`です。`./dev/scripts/build-app-icon.ps1`で16～256pxの10サイズを含むICOを再生成できます。画像生成ツールで作成したマスターを使用しています。
+独自アイコンのマスターは`src/OfficeAssist/assets/OfficeAssist.png`です。`./dev/scripts/build-app-icon.ps1`でマスターの透明余白を調整し、16～256pxの10サイズを含むICOを再生成できます。画像生成ツールで作成したマスターを使用しています。
 
 版別結果は[開発資料](../dev/README.md)を参照してください。
 
