@@ -9,6 +9,7 @@ internal sealed class TrayContext : ApplicationContext
     readonly NotifyIcon tray;
     readonly ContextMenuStrip menu = new();
     readonly ManagementEndpoint endpoint;
+    readonly ExcelDropService dropService;
     public TrayContext(bool silent)
     {
         _ = window.Handle;
@@ -20,9 +21,20 @@ internal sealed class TrayContext : ApplicationContext
         tray = new NotifyIcon { Icon = icon, Text = "OfficeAssist", Visible = true, ContextMenuStrip = menu };
         tray.DoubleClick += (_, _) => ShowWindow();
         toggle.CheckedChanged += (_, _) => window.FeatureEnabled = toggle.Checked;
-        window.FeatureChanged += enabled => { toggle.Checked = enabled; window.SetResult(enabled ? "待機中" : "一時停止中"); };
+        dropService = new ExcelDropService(window, (message, failed) =>
+        {
+            window.SetResult(message);
+            tray.ShowBalloonTip(4000, "OfficeAssist", message, failed ? ToolTipIcon.Warning : ToolTipIcon.Info);
+        });
+        window.FeatureChanged += enabled =>
+        {
+            toggle.Checked = enabled;
+            dropService.Enabled = enabled;
+            window.SetResult(enabled ? "待機中" : "一時停止中");
+        };
         window.ExitRequested += Stop;
-        endpoint = new ManagementEndpoint("office-assist", window, ShowWindow, Stop);
+        endpoint = new ManagementEndpoint("office-assist", window, ShowWindow, Stop,
+            () => dropService.Busy ? "画像を挿入中です。" : null);
         if (!silent) ShowWindow();
     }
 
@@ -33,11 +45,11 @@ internal sealed class TrayContext : ApplicationContext
         window.Activate();
     }
 
-    void Stop() { window.AllowExit = true; window.Close(); ExitThread(); }
+    void Stop() { if (dropService.Busy) return; window.AllowExit = true; window.Close(); ExitThread(); }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { endpoint.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose(); window.Dispose(); icon.Dispose(); }
+        if (disposing) { endpoint.Dispose(); dropService.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose(); window.Dispose(); icon.Dispose(); }
         base.Dispose(disposing);
     }
 }
