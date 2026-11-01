@@ -78,7 +78,7 @@ internal static class ExcelPictureInserter
         }
         else options = new InsertOptions(Destination.DropPosition, PictureKind.Embedded, []);
         if (options.Kind == PictureKind.ImageFormula && options.Urls.Length != files.Count)
-            throw new InvalidOperationException("IMAGE関数には画像URLが必要です。Shiftを押しながらドロップし、URLを指定してください。");
+            throw new InvalidOperationException($"IMAGE関数には画像URLが必要です。{InsertSettings.LoadModifier()}を押しながらドロップし、URLを指定してください。");
         var destinations = new List<object>();
         if (options.Destination == Destination.DropPosition) destinations.Add(anchor);
         else for (int i = 1; i <= (int)areas.Count; i++) destinations.Add(com.Own(areas.Item(i)));

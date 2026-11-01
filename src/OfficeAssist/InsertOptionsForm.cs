@@ -15,16 +15,19 @@ internal sealed class InsertOptionsForm : BrandedForm
     readonly TextBox urls = new() { Multiline = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     readonly Label urlLabel = new() { Text = "画像の HTTPS URL（1画像につき1行）", AutoSize = true };
     readonly ToolTip tips = new();
+    readonly ComboBox modifier = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
     readonly int fileCount;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal InsertOptions? Options { get; private set; }
+    internal DialogModifier Modifier => (DialogModifier)modifier.SelectedIndex;
 
-    internal InsertOptionsForm(string selectedAddress, int count, bool allowLinkedImages = true, InsertOptions? defaults = null)
+    internal InsertOptionsForm(string selectedAddress, int count, bool allowLinkedImages = true, InsertOptions? defaults = null,
+        bool settingsMode = false, DialogModifier dialogModifier = DialogModifier.Shift)
     {
         fileCount = count;
         linked.Name = "LinkedPictureOption";
         linked.Enabled = allowLinkedImages;
-        Text = WindowTitle.Create("画像の挿入");
+        Text = WindowTitle.Create(settingsMode ? "Excelドロップ設定" : "画像の挿入");
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
@@ -39,6 +42,8 @@ internal sealed class InsertOptionsForm : BrandedForm
         linked.Checked = defaults.Kind == PictureKind.Linked && allowLinkedImages;
         formula.Checked = defaults.Kind == PictureKind.ImageFormula;
         tips.SetToolTip(fit, selectedAddress);
+        modifier.Items.AddRange(["Shift", "Ctrl", "Alt"]);
+        modifier.SelectedIndex = (int)dialogModifier;
         static GroupBox Group(string text, params Control[] controls)
         {
             var group = new GroupBox { Text = text, Dock = DockStyle.Fill, Padding = new Padding(8) };
@@ -50,10 +55,15 @@ internal sealed class InsertOptionsForm : BrandedForm
             layout.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
         layout.Controls.Add(Group("挿入先", drop, selection, fit), 0, 0);
         layout.Controls.Add(Group("挿入形式", embedded, linked, formula), 0, 1);
-        layout.Controls.Add(urlLabel, 0, 2); layout.Controls.Add(urls, 0, 3);
+        if (settingsMode)
+        {
+            layout.RowStyles[2].Height = 62;
+            layout.Controls.Add(Group("設定画面を開く修飾キー", modifier), 0, 2);
+        }
+        else { layout.Controls.Add(urlLabel, 0, 2); layout.Controls.Add(urls, 0, 3); }
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
         var cancel = new Button { Text = "キャンセル", AutoSize = true, DialogResult = DialogResult.Cancel };
-        var apply = new Button { Text = "挿入", AutoSize = true };
+        var apply = new Button { Text = settingsMode ? "保存" : "挿入", AutoSize = true };
         buttons.Controls.Add(cancel); buttons.Controls.Add(apply); layout.Controls.Add(buttons, 0, 4); Controls.Add(layout);
         AcceptButton = apply; CancelButton = cancel;
         tips.SetToolTip(urls, "HTTPSの画像ファイルを直接取得できるURLを画像と同じ順に指定します。認証が必要なURLはExcelで表示できません。");
@@ -64,7 +74,7 @@ internal sealed class InsertOptionsForm : BrandedForm
         apply.Click += (_, _) =>
         {
             var items = urls.Lines.Select(s => s.Trim()).Where(s => s.Length != 0).ToArray();
-            if (formula.Checked && (items.Length != fileCount || items.Any(s => !Uri.TryCreate(s, UriKind.Absolute, out var uri)
+            if (!settingsMode && formula.Checked && (items.Length != fileCount || items.Any(s => !Uri.TryCreate(s, UriKind.Absolute, out var uri)
                 || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo))))
             {
                 MessageBox.Show(this, $"認証情報を含まないHTTPS画像URLを、画像の順に{fileCount}件指定してください。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);

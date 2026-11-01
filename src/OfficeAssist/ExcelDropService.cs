@@ -60,14 +60,15 @@ internal sealed class ExcelDropService : IDisposable
         overlay.Show();
     }
 
-    bool QueueInsert(string[] files, Point point, bool showOptions)
+    bool QueueInsert(string[] files, Point point, int keyState)
     {
         if (Busy || !enabled) return false;
         suppressed = true;
         var handle = target;
         bool allowLinks = allowLinkedImages;
         ReceivedImageBatch batch;
-        try { batch = ReceivedImageBatch.Capture(files); }
+        bool showOptions;
+        try { showOptions = InsertSettings.IsPressed(InsertSettings.LoadModifier(), keyState); batch = ReceivedImageBatch.Capture(files); }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException
             or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         { report("画像を受け取れませんでした: " + ex.Message, true); return false; }

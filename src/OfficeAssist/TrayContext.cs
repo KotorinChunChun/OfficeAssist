@@ -10,12 +10,14 @@ internal sealed class TrayContext : ApplicationContext
     readonly ContextMenuStrip menu = new();
     readonly ManagementEndpoint endpoint;
     readonly ExcelDropService dropService;
+    bool settingsOpen;
     public TrayContext()
     {
         _ = window.Handle;
         var toggle = new ToolStripMenuItem("Excelへの画像ドロップ") { Checked = true, CheckOnClick = true };
         menu.Items.Add("開く", null, (_, _) => ShowWindow());
         menu.Items.Add(toggle);
+        menu.Items.Add("Excelドロップ設定", null, (_, _) => ShowSettings());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("終了", null, (_, _) => Stop());
         tray = new NotifyIcon { Icon = icon, Text = "OfficeAssist", Visible = true, ContextMenuStrip = menu };
@@ -32,7 +34,7 @@ internal sealed class TrayContext : ApplicationContext
             window.SetResult(enabled ? "待機中" : "一時停止中");
         };
         endpoint = new ManagementEndpoint("office-assist", window, ShowWindow, Stop,
-            () => dropService.Busy ? "画像を挿入中です。" : null);
+            () => dropService.Busy ? "画像を挿入中です。" : settingsOpen ? "設定画面を表示中です。" : null);
     }
 
     void ShowWindow()
@@ -42,7 +44,31 @@ internal sealed class TrayContext : ApplicationContext
         window.Activate();
     }
 
-    void Stop() { if (dropService.Busy) return; window.AllowExit = true; window.Close(); ExitThread(); }
+    void ShowSettings()
+    {
+        if (dropService.Busy || settingsOpen) return;
+        settingsOpen = true;
+        bool wasEnabled = dropService.Enabled;
+        dropService.Enabled = false;
+        try
+        {
+            using var dialog = new InsertOptionsForm("", 0, defaults: InsertSettings.Load(), settingsMode: true,
+                dialogModifier: InsertSettings.LoadModifier());
+            if (dialog.ShowDialog() == DialogResult.OK && dialog.Options is not null)
+            {
+                InsertSettings.Save(dialog.Options, dialog.Modifier);
+                window.SetResult("Excelドロップ設定を保存しました。");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            window.SetResult(ex.Message);
+            MessageBox.Show(ex.Message, WindowTitle.Create("Excelドロップ設定"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally { dropService.Enabled = wasEnabled; settingsOpen = false; }
+    }
+
+    void Stop() { if (dropService.Busy || settingsOpen) return; window.AllowExit = true; window.Close(); ExitThread(); }
 
     protected override void Dispose(bool disposing)
     {

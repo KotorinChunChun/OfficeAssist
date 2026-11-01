@@ -36,10 +36,10 @@ internal static partial class Program
         using var overlay = new DropOverlay();
         ReceivedImageBatch? accepted = null;
         bool accept = false;
-        bool shiftAtDrop = false;
-        overlay.FilesDropped += (paths, _, shift) =>
+        int keysAtDrop = -1;
+        overlay.FilesDropped += (paths, _, keys) =>
         {
-            shiftAtDrop = shift;
+            keysAtDrop = keys;
             if (!accept) return false;
             accepted = ReceivedImageBatch.Capture(paths, root);
             Check(File.Exists(accepted.Images.Single()), "Copy応答より先に画像を確保");
@@ -58,20 +58,32 @@ internal static partial class Program
         accept = true; Enter();
         Check(Drop().Effect == DragDropEffects.Copy && accepted is not null, "画像を確保した場合だけCopyを応答");
         accepted?.Dispose();
-        Check(!shiftAtDrop, "通常のドロップはShiftなしとして受け取る");
+        Check(keysAtDrop == 0, "通常のドロップは修飾キーなしとして受け取る");
         Enter();
-        Check(Drop(4).Effect == DragDropEffects.Copy && shiftAtDrop, "ドロップ時のShiftを受け取る");
+        Check(Drop(4).Effect == DragDropEffects.Copy && keysAtDrop == 4, "ドロップ時のShiftを受け取る");
         accepted?.Dispose();
+        Check(InsertSettings.IsPressed(DialogModifier.Shift, 4) && !InsertSettings.IsPressed(DialogModifier.Shift, 8), "Shift設定を判定");
+        Check(InsertSettings.IsPressed(DialogModifier.Ctrl, 8) && !InsertSettings.IsPressed(DialogModifier.Ctrl, 4), "Ctrl設定を判定");
+        Check(InsertSettings.IsPressed(DialogModifier.Alt, 32) && !InsertSettings.IsPressed(DialogModifier.Alt, 4), "Alt設定を判定");
+        string settingsFile = Path.Combine(root, "settings.json");
+        File.WriteAllText(settingsFile, "{\"Destination\":2,\"Kind\":0}");
+        Check(InsertSettings.LoadModifier(settingsFile) == DialogModifier.Shift, "従来の設定はShiftを引き継ぐ");
+        InsertSettings.Save(new(Destination.SelectionPosition, PictureKind.ImageFormula, ["https://example.org/private"]), DialogModifier.Ctrl, settingsFile);
+        Check(InsertSettings.Load(settingsFile).Destination == Destination.SelectionPosition && InsertSettings.LoadModifier(settingsFile) == DialogModifier.Ctrl,
+            "挿入先と修飾キーを保存する");
+        Check(!File.ReadAllText(settingsFile).Contains("example.org"), "画像URLを既定設定に保存しない");
+        InsertSettings.Save(new(Destination.SelectionRange, PictureKind.Embedded, []), path: settingsFile);
+        Check(InsertSettings.LoadModifier(settingsFile) == DialogModifier.Ctrl, "ドロップ時の設定変更で修飾キーを維持する");
 
         // 実際のDropから呼ばれるサービス経路でもInvalidDataExceptionをOLEへ漏らさない。
         using var dispatcher = new Control();
         int reports = 0;
         using var service = new ExcelDropService(dispatcher, (_, isFailure) => { if (isFailure) reports++; }, startTimer: false);
         var queue = typeof(ExcelDropService).GetMethod("QueueInsert", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        Check(queue.Invoke(service, [new[] { invalid }, Point.Empty, false]) is false && !service.Busy && reports == 1,
+        Check(queue.Invoke(service, [new[] { invalid }, Point.Empty, 0]) is false && !service.Busy && reports == 1,
             "壊れた画像はサービス経路でも例外を漏らさず受信拒否");
         string empty = Path.Combine(output, "empty.png"); File.WriteAllBytes(empty, []);
-        Check(queue.Invoke(service, [new[] { empty }, Point.Empty, false]) is false && !service.Busy && reports == 2,
+        Check(queue.Invoke(service, [new[] { empty }, Point.Empty, 0]) is false && !service.Busy && reports == 2,
             "空画像の検証例外でもCopy成功や処理中状態にしない");
     }
 }

@@ -2,33 +2,50 @@ using System.Text.Json;
 
 namespace OfficeAssist;
 
+internal enum DialogModifier { Shift, Ctrl, Alt }
+
 internal static class InsertSettings
 {
     internal static InsertOptions Default => new(Destination.SelectionRange, PictureKind.Embedded, []);
     static string PathName => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OfficeAssist", "insert-settings.json");
-    sealed record StoredSettings(Destination Destination, PictureKind Kind);
+    sealed record StoredSettings(Destination Destination, PictureKind Kind, DialogModifier Modifier = DialogModifier.Shift);
 
-    internal static InsertOptions Load()
+    internal static InsertOptions Load(string? path = null)
     {
-        if (!File.Exists(PathName)) return Default;
+        var saved = Read(path);
+        return new(saved.Destination, saved.Kind, []);
+    }
+
+    internal static DialogModifier LoadModifier(string? path = null) => Read(path).Modifier;
+
+    static StoredSettings Read(string? path = null)
+    {
+        path ??= PathName;
+        if (!File.Exists(path)) return new(Destination.SelectionRange, PictureKind.Embedded);
         try
         {
-            var saved = JsonSerializer.Deserialize<StoredSettings>(File.ReadAllText(PathName));
-            if (saved is null || !Enum.IsDefined(saved.Destination) || !Enum.IsDefined(saved.Kind)) throw new InvalidDataException();
-            return new(saved.Destination, saved.Kind, []);
+            var saved = JsonSerializer.Deserialize<StoredSettings>(File.ReadAllText(path));
+            if (saved is null || !Enum.IsDefined(saved.Destination) || !Enum.IsDefined(saved.Kind) || !Enum.IsDefined(saved.Modifier)) throw new InvalidDataException();
+            return saved;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or InvalidDataException)
         { throw new InvalidOperationException("挿入設定を読み込めません。設定ファイルを確認してください。", ex); }
     }
 
-    internal static void Save(InsertOptions options)
+    internal static bool IsPressed(DialogModifier modifier, int keyState) => (keyState & (modifier switch
     {
-        string path = PathName;
+        DialogModifier.Shift => 4, DialogModifier.Ctrl => 8, DialogModifier.Alt => 32,
+        _ => throw new ArgumentOutOfRangeException(nameof(modifier))
+    })) != 0;
+
+    internal static void Save(InsertOptions options, DialogModifier? modifier = null, string? path = null)
+    {
+        path ??= PathName;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(new StoredSettings(options.Destination, options.Kind)));
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new StoredSettings(options.Destination, options.Kind, modifier ?? LoadModifier(path))));
             File.Move(temporary, path, true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
