@@ -15,6 +15,8 @@ internal sealed class MainForm : BrandedForm
     {
         Text = WindowTitle.Create();
         StartPosition = FormStartPosition.CenterScreen;
+        MinimizeBox = false;
+        MaximizeBox = false;
         ClientSize = new Size(440, 190);
         MinimumSize = new Size(400, 220);
         Font = new Font("Yu Gothic UI", 10);
