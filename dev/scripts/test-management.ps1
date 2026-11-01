@@ -29,7 +29,8 @@ if ($StartForTest) {
 $before = Send-OfficeRequest 'status' | ConvertFrom-Json
 $officeProcess = Get-Process -Id $before.pid
 if ($officeProcess.Path -ne $officeExecutable) { throw '試験対象と起動中の実行ファイルが異なります。' }
-if ($before.protocolVersion -ne 2 -or !$before.ready -or $before.version -ne '0.1.0') { throw '管理状態が一致しません。' }
+$expectedVersion = (Get-Item -LiteralPath $officeExecutable).VersionInfo.ProductVersion.Split('+')[0]
+if ($before.protocolVersion -ne 2 -or !$before.ready -or $before.version -ne $expectedVersion) { throw '管理状態が一致しません。' }
 'PASS: 起動中の実行ファイル・管理契約2・版・readyを確認'
 $refused = Send-OfficeRequest ('{"command":"stop","expectedPid":' + ($before.pid + 1) + '}') | ConvertFrom-Json
 if ($refused.result -ne 'refused') { throw '不一致PIDの停止要求が拒否されません。' }

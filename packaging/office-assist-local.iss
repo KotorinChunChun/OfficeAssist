@@ -7,14 +7,14 @@
 [Setup]
 AppId=KotorinToys.OfficeAssist
 AppName=OfficeAssist
-AppVersion=0.1.0
+AppVersion=0.2.0
 DefaultDirName={localappdata}\Programs\OfficeAssist
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 MinVersion=10.0.22000
 OutputDir={#OutputDirectory}
-OutputBaseFilename=OfficeAssist-0.1.0-setup
+OutputBaseFilename=OfficeAssist-0.2.0-setup
 Compression=lzma2/fast
 SolidCompression=yes
 CloseApplications=no

@@ -66,13 +66,14 @@ internal sealed class ExcelDropService : IDisposable
         // OLEのDrop呼出中にExcelへCOMを送るとビジーになるため、応答後にUIキューから実行する。
         dispatcher.BeginInvoke(new Action(() =>
         {
-            try { report(ExcelPictureInserter.Insert(handle, point, files), false); }
+            try { var result = ExcelPictureInserter.InsertInteractive(handle, point, files); if (result is not null) report(result, false); }
             catch (Exception ex)
             {
                 var message = ex is System.Runtime.InteropServices.COMException
                     ? "Excelへ接続できません。セルの編集やダイアログを閉じ、通常権限のExcelへ再度ドロップしてください。"
                     : ex.Message;
                 report(message, true);
+                MessageBox.Show(message, WindowTitle.Create("画像の挿入"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { Busy = false; }
         }));
