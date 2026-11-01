@@ -11,6 +11,8 @@
     <ApplicationIcon>assets/OfficeAssist.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Update="Microsoft.NETCore.App;Microsoft.WindowsDesktop.App.WindowsForms" RuntimeFrameworkVersion="10.0.14" Condition="'$(SelfContained)' == 'true'" />
+    <KnownFrameworkReference Update="Microsoft.WindowsDesktop.App;Microsoft.WindowsDesktop.App.WindowsForms" DefaultRuntimeFrameworkVersion="10.0.14" LatestRuntimeFrameworkVersion="10.0.14" Condition="'$(SelfContained)' == 'true'" />
     <EmbeddedResource Include="assets/OfficeAssist.ico" LogicalName="OfficeAssist.AppIcon.ico" />
     <InternalsVisibleTo Include="OfficeAssist.Tests" />
   </ItemGroup>
