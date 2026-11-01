@@ -14,11 +14,11 @@ Officeをカスタマイズして便利に使うためのWindows用常駐アプ�
 
 ## インストール
 
-[GitHub Releases](https://github.com/KotorinChunChun/OfficeAssist/releases)からセットアップファイルをダウンロードして実行します。利用には.NET Desktop Runtime 10 x64が必要です。
+[GitHub Releases](https://github.com/KotorinChunChun/OfficeAssist/releases)からセットアップファイルをダウンロードして実行します。v0.2.0以降のセットアップには.NETランタイムを同梱しています。
 
 ## 対応環境
 
-Windows 11 x64、.NET Desktop Runtime 10 x64、インストール済みのデスクトップ版Microsoft Excelが必要です。ExcelとOfficeAssistは通常権限で実行してください。Web版Excelは対象外です。
+Windows 11 x64とインストール済みのデスクトップ版Microsoft Excelが必要です。ExcelとOfficeAssistは通常権限で実行してください。Web版Excelは対象外です。
 
 - [使い方と制限](docs/guide.md)
 - [開発者ガイド](docs/development.md)
