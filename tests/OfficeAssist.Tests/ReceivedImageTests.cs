@@ -3,7 +3,7 @@ using System.Reflection;
 
 internal static partial class Program
 {
-    static void ReceivedImageTests(string output, string image, string invalid)
+    static void ReceivedImageTests(string output, string image, string image2, string invalid)
     {
         string root = Path.Combine(output, "received-tests");
         Directory.CreateDirectory(root);
@@ -18,6 +18,12 @@ internal static partial class Program
         Check(!File.Exists(owned) && Directory.GetDirectories(root).Length == 0, "完了・キャンセルで自分の受信画像だけを片付けられる");
         using (var saved = ReceivedImageBatch.Capture([image], root))
             Check(saved.Originals.Single() == image && saved.Images.Single() != image, "Explorerリンク用の原本パスを保持");
+        using (var multiple = ReceivedImageBatch.Capture([image, image2], root))
+            Check(multiple.Images.Count == 2 && multiple.Originals.SequenceEqual([image, image2]), "複数画像を順序どおり受信する");
+        Check(ImageAssignment.Create(3, 1).SequenceEqual([(0, 0)]), "１枚は先頭範囲だけに挿入する");
+        Check(ImageAssignment.Create(3, 2).SequenceEqual([(0, 0), (1, 1)]), "複数画像を範囲順に割り当てる");
+        Check(ImageAssignment.Create(2, 4).SequenceEqual([(0, 0), (1, 1), (1, 2), (1, 3)]), "余った画像は最後の範囲にまとめる");
+        Check(ImageAssignment.Create(1, 3).SequenceEqual([(0, 0), (0, 1), (0, 2)]), "単一範囲にも全画像を割り当てる");
         Check(File.Exists(image), "受信整理で原本を削除しない");
         Reject(() => ReceivedImageBatch.Capture([image, invalid], root), "壊れた受信画像をCopy応答前に拒否");
         Check(Directory.GetDirectories(root).Length == 0 && File.Exists(image) && File.Exists(invalid), "一括検証失敗で所有コピーだけを回収");

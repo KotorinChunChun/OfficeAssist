@@ -78,7 +78,15 @@ internal sealed class ExcelDropService : IDisposable
         try { dispatcher.BeginInvoke(new Action(() =>
         {
             using var received = batch;
-            try { var result = ExcelPictureInserter.InsertInteractive(handle, point, received.Images, received.Originals, allowLinks, showOptions); if (result is not null) report(result, false); }
+            try
+            {
+                var result = ExcelPictureInserter.InsertInteractive(handle, point, received.Images, received.Originals, allowLinks, showOptions);
+                if (result is not null)
+                {
+                    report(result.Warning is null ? result.Message : result.Message + Environment.NewLine + result.Warning, false);
+                    if (result.Warning is not null) MessageBox.Show(result.Warning, WindowTitle.Create("画像の挿入"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
             catch (Exception ex)
             {
                 var message = ex is System.Runtime.InteropServices.COMException

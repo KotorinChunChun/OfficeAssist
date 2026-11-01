@@ -15,14 +15,15 @@ internal sealed class ComScope : IDisposable
 
 internal static class ExcelPictureInserter
 {
+    internal sealed record Result(string Message, string? Warning = null);
     internal static string Insert(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files) =>
-        InsertCore(sheetHandle, screenPoint, files, false)!;
+        InsertCore(sheetHandle, screenPoint, files, false)!.Message;
 
-    internal static string? InsertInteractive(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files,
+    internal static Result? InsertInteractive(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files,
         IReadOnlyList<string>? linkedFiles = null, bool allowLinkedImages = true, bool showOptions = false) =>
         InsertCore(sheetHandle, screenPoint, files, true, linkedFiles, allowLinkedImages, showOptions);
 
-    static string? InsertCore(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files, bool interactive,
+    static Result? InsertCore(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files, bool interactive,
         IReadOnlyList<string>? linkedFiles = null, bool allowLinkedImages = true, bool showOptions = false)
     {
         ImageFiles.Validate(files);
@@ -83,13 +84,16 @@ internal static class ExcelPictureInserter
         if (options.Destination == Destination.DropPosition) destinations.Add(anchor);
         else for (int i = 1; i <= (int)areas.Count; i++) destinations.Add(com.Own(areas.Item(i)));
         string address = options.Destination == Destination.DropPosition ? (string)anchor.Address : selectedAddress;
-        var assignments = new List<(int Area, int File)>();
-        if (files.Count == 1)
-            for (int i = 0; i < destinations.Count; i++) assignments.Add((i, 0));
-        else
-            for (int i = 0; i < files.Count; i++) assignments.Add((i % destinations.Count, i));
+        var assignments = ImageAssignment.Create(destinations.Count, files.Count);
+        var warnings = new List<string>();
+        if (options.Destination != Destination.DropPosition && files.Count > destinations.Count)
+            warnings.Add("選択範囲が画像数より少ないため、残りの画像を最後の選択範囲にまとめて挿入しました。");
+        string message;
         if (options.Kind == PictureKind.ImageFormula)
-            return InsertFormulas(com, destinations, assignments, options, sheetName, address);
+        {
+            message = InsertFormulas(com, destinations, assignments, options, sheetName, address);
+            return Finish(com, window, sheet, selected, destinations, assignments, options, message, warnings);
+        }
         var insertFiles = options.Kind == PictureKind.Linked ? linkedFiles ?? files : files;
         if (options.Kind == PictureKind.Linked)
         {
@@ -136,7 +140,51 @@ internal static class ExcelPictureInserter
                 ? "画像を挿入できませんでした。今回の追加は取り消しました。Excelの編集状態と画像を確認してください。"
                 : "挿入に失敗し、一部の画像を取り消せませんでした。対象シートを確認してください。", error);
         }
-        return $"{assignments.Count}枚を挿入しました（{sheetName} {address}）。";
+        message = $"{assignments.Count}枚を挿入しました（{sheetName} {address}）。";
+        return Finish(com, window, sheet, selected, destinations, assignments, options, message, warnings);
+    }
+
+    static Result Finish(ComScope com, dynamic window, dynamic sheet, dynamic selected, List<object> destinations,
+        List<(int Area, int File)> assignments, InsertOptions options, string message, List<string> warnings)
+    {
+        if (options.Destination != Destination.DropPosition)
+        {
+            try { AdvanceSelection(com, window, sheet, selected, destinations, Math.Min(destinations.Count, assignments.Count)); }
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+            { warnings.Add("画像は挿入しましたが選択範囲を更新できませんでした。次の挿入先を選び直してください。"); }
+        }
+        return new Result(message, warnings.Count == 0 ? null : string.Join(Environment.NewLine, warnings));
+    }
+
+    internal static void AdvanceSelection(ComScope com, dynamic window, dynamic sheet, dynamic selected,
+        List<object> destinations, int consumed)
+    {
+        dynamic app = com.Own(window.Application);
+        if (consumed < destinations.Count)
+        {
+            dynamic remaining = destinations[consumed];
+            for (int i = consumed + 1; i < destinations.Count; i++) remaining = com.Own(app.Union(remaining, destinations[i]));
+            remaining.Select();
+            return;
+        }
+        // Excelには空のセル選択がないため、元の選択範囲に重ならない隣接セルへ移る。
+        dynamic last = destinations[^1];
+        dynamic rows = com.Own(last.Rows);
+        dynamic columns = com.Own(last.Columns);
+        int row = (int)last.Row, column = (int)last.Column;
+        int bottom = row + (int)rows.Count - 1, right = column + (int)columns.Count - 1;
+        (int Row, int Column)[] candidates = [(row, right + 1), (bottom + 1, column), (row, column - 1), (row - 1, column)];
+        dynamic sheetCells = com.Own(sheet.Cells);
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Row < 1 || candidate.Row > 1048576 || candidate.Column < 1 || candidate.Column > 16384) continue;
+            dynamic cell = com.Own(sheetCells.Item(candidate.Row, candidate.Column));
+            object? intersect = app.Intersect(selected, cell);
+            if (intersect is not null) { com.Own(intersect); continue; }
+            cell.Select();
+            return;
+        }
+        throw new InvalidOperationException("選択外のセルが見つかりません。");
     }
 
     static string InsertFormulas(ComScope com, List<object> destinations, List<(int Area, int File)> assignments, InsertOptions options, string sheetName, string address)

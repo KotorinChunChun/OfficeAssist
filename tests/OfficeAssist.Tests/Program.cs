@@ -54,7 +54,8 @@ internal static partial class Program
             Check(true, "実画像をデコード検証");
             var invalid = Path.Combine(output, "invalid.png");
             File.WriteAllText(invalid, "これは画像ではありません。");
-            ReceivedImageTests(output, image, invalid);
+            ReceivedImageTests(output, image, image2, invalid);
+            if (args.Contains("--selection-com")) ExcelSelectionTests();
             Reject(() => ImageFiles.Validate([image, invalid]), "拡張子偽装を拒否");
             Reject(() => ImageFiles.Validate([Path.Combine(output, "missing.jpg")]), "存在しない画像を拒否");
             Check(ImageFiles.Fit(960, 480) == new SizeF(480, 240), "横長画像の縦横比と上限");
