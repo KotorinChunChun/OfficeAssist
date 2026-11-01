@@ -30,6 +30,16 @@ internal static class Native
         return name.ToString();
     }
 
+    internal static bool IsExternalImageDragSource(nint hwnd)
+    {
+        if (hwnd == 0) return false;
+        nint root = GetAncestor(hwnd, 2 /* GA_ROOT */);
+        if (root == 0) return false;
+        GetWindowThreadProcessId(root, out uint pid);
+        return ImageDragOrigin.IsEligible(ClassName(root), pid, (uint)Environment.ProcessId);
+    }
+
+    // 受信可否には使わない。既存のExplorer起点に限り原本へのリンク選択を維持する。
     internal static bool IsExplorer(nint hwnd)
     {
         GetWindowThreadProcessId(hwnd, out uint pid);

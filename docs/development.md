@@ -25,6 +25,13 @@ dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -- --exc
 
 `--excel`は新しいExcelプロセスで専用ブックを作り、試験後に保存・終了します。既存ExcelのPIDと一致したら中止します。GUI試験用の`--fixture`は専用Excelを最大25分間開き、出力先へ`stop-fixture`ファイルを作成すると試験ブックを保存して終了します。毎回新しい出力先を指定してください。
 
+通常試験には、Explorer以外の外部起点、Excel内操作とOfficeAssist自身の除外、Copy可能な画像FileDropの判定、非画像と送信元読取例外の回帰も含みます。実入力・クリップボード・既存Excelは操作しません。PR用に出力を分ける例:
+
+```powershell
+dotnet build tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release --artifacts-path artifacts/external-drop-pr -warnaserror
+dotnet artifacts/external-drop-pr/bin/OfficeAssist.Tests/release/OfficeAssist.Tests.dll dev/history/v0.2.1/logs/unit
+```
+
 管理用ビルド後、OfficeAssistが停止している状態で次を実行すると、無表示起動・状態・誤PID拒否・不正要求後の受付・二重起動・正常停止を確認します。起動中のものがあれば試験起動を中止します。
 
 ```powershell

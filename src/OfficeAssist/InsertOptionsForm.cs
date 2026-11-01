@@ -19,9 +19,11 @@ internal sealed class InsertOptionsForm : BrandedForm
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal InsertOptions? Options { get; private set; }
 
-    internal InsertOptionsForm(string selectedAddress, int count)
+    internal InsertOptionsForm(string selectedAddress, int count, bool allowLinkedImages = true)
     {
         fileCount = count;
+        linked.Name = "LinkedPictureOption";
+        linked.Enabled = allowLinkedImages;
         Text = WindowTitle.Create("画像の挿入");
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -49,6 +51,8 @@ internal sealed class InsertOptionsForm : BrandedForm
         buttons.Controls.Add(cancel); buttons.Controls.Add(apply); layout.Controls.Add(buttons, 0, 5); Controls.Add(layout);
         AcceptButton = apply; CancelButton = cancel;
         tips.SetToolTip(urls, "HTTPSの画像ファイルを直接取得できるURLを画像と同じ順に指定します。認証が必要なURLはExcelで表示できません。");
+        tips.SetToolTip(embedded, "受信画像をブックへ保存します。送信元の一時ファイルが削除されても表示できます。");
+        tips.SetToolTip(linked, "Explorerからの画像のみ選択できます。元ファイルを移動・削除すると参照できなくなる場合があります。");
         void UpdateUrl() { urls.Enabled = formula.Checked; urlLabel.Enabled = formula.Checked; }
         formula.CheckedChanged += (_, _) => UpdateUrl(); UpdateUrl();
         apply.Click += (_, _) =>

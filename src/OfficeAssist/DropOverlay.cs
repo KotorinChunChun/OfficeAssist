@@ -2,7 +2,7 @@ namespace OfficeAssist;
 
 internal sealed class DropOverlay : BrandedForm
 {
-    internal event Action<string[], Point>? FilesDropped;
+    internal event Func<string[], Point, bool>? FilesDropped;
     internal event Action? Rejected;
     internal bool Receiving { get; private set; }
     string[]? pendingFiles;
@@ -20,8 +20,8 @@ internal sealed class DropOverlay : BrandedForm
         DragEnter += (_, e) =>
         {
             Receiving = true;
-            pendingFiles = e.Data?.GetData(DataFormats.FileDrop) as string[];
-            if (ImageFiles.Accepts(pendingFiles) && (e.AllowedEffect & DragDropEffects.Copy) != 0)
+            pendingFiles = ImageDropData.Read(e.Data, e.AllowedEffect);
+            if (pendingFiles is not null)
                 e.Effect = DragDropEffects.Copy;
             else { e.Effect = DragDropEffects.None; pendingFiles = null; Rejected?.Invoke(); }
         };
@@ -35,9 +35,9 @@ internal sealed class DropOverlay : BrandedForm
             pendingFiles = null;
             if (files is not null && (e.AllowedEffect & DragDropEffects.Copy) != 0)
             {
-                e.Effect = DragDropEffects.Copy;
-                FilesDropped?.Invoke(files, new Point(e.X, e.Y));
+                e.Effect = FilesDropped?.Invoke(files, new Point(e.X, e.Y)) == true ? DragDropEffects.Copy : DragDropEffects.None;
             }
+            else e.Effect = DragDropEffects.None;
             Hide();
         };
     }

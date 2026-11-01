@@ -3,7 +3,7 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 
-internal static class Program
+internal static partial class Program
 {
     static int count;
     static void Check(bool value, string name)
@@ -28,6 +28,7 @@ internal static class Program
         Directory.CreateDirectory(output);
         try
         {
+            DropTests();
             var image = Path.Combine(output, "01-blue.png");
             using (var bitmap = new Bitmap(240, 120))
             {
@@ -53,6 +54,7 @@ internal static class Program
             Check(true, "実画像をデコード検証");
             var invalid = Path.Combine(output, "invalid.png");
             File.WriteAllText(invalid, "これは画像ではありません。");
+            ReceivedImageTests(output, image, invalid);
             Reject(() => ImageFiles.Validate([image, invalid]), "拡張子偽装を拒否");
             Reject(() => ImageFiles.Validate([Path.Combine(output, "missing.jpg")]), "存在しない画像を拒否");
             Check(ImageFiles.Fit(960, 480) == new SizeF(480, 240), "横長画像の縦横比と上限");

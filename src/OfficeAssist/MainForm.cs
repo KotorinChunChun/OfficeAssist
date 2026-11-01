@@ -24,7 +24,7 @@ internal sealed class MainForm : BrandedForm
         layout.Controls.Add(enabled, 0, 0);
         layout.Controls.Add(result, 0, 1);
         Controls.Add(layout);
-        tips.SetToolTip(enabled, "フォルダーからExcelのシートへ画像をドラッグ＆ドロップして挿入します。");
+        tips.SetToolTip(enabled, "フォルダーやSSCaptureなどから、画像ファイルをExcelのシートへドラッグ＆ドロップして挿入します。");
         tips.SetToolTip(result, "直近の操作結果です。ウィンドウの×ボタンでは通知領域に常駐します。");
         enabled.CheckedChanged += (_, _) => FeatureChanged?.Invoke(enabled.Checked);
         FormClosing += (_, e) =>

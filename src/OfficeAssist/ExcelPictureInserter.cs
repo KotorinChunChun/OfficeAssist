@@ -18,10 +18,12 @@ internal static class ExcelPictureInserter
     internal static string Insert(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files) =>
         InsertCore(sheetHandle, screenPoint, files, false)!;
 
-    internal static string? InsertInteractive(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files) =>
-        InsertCore(sheetHandle, screenPoint, files, true);
+    internal static string? InsertInteractive(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files,
+        IReadOnlyList<string>? linkedFiles = null, bool allowLinkedImages = true) =>
+        InsertCore(sheetHandle, screenPoint, files, true, linkedFiles, allowLinkedImages);
 
-    static string? InsertCore(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files, bool interactive)
+    static string? InsertCore(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files, bool interactive,
+        IReadOnlyList<string>? linkedFiles = null, bool allowLinkedImages = true)
     {
         ImageFiles.Validate(files);
         if (!Native.IsWindow(sheetHandle) || Native.ClassName(sheetHandle) != "EXCEL7"
@@ -58,7 +60,7 @@ internal static class ExcelPictureInserter
         InsertOptions options;
         if (interactive)
         {
-            using var dialog = new InsertOptionsForm(selectedAddress, files.Count);
+            using var dialog = new InsertOptionsForm(selectedAddress, files.Count, allowLinkedImages);
             if (dialog.ShowDialog() != DialogResult.OK || dialog.Options is null) return null;
             options = dialog.Options;
             if (!Native.IsWindow(sheetHandle) || !Native.IsWindowEnabled(Native.GetAncestor(sheetHandle, 2)))
@@ -76,11 +78,17 @@ internal static class ExcelPictureInserter
         string address = (string)destination.Address;
         if (options.Kind == PictureKind.ImageFormula)
             return InsertFormulas(com, sheet, destination, options, files.Count, sheetName, address);
+        var insertFiles = options.Kind == PictureKind.Linked ? linkedFiles ?? files : files;
+        if (options.Kind == PictureKind.Linked)
+        {
+            if (!allowLinkedImages) throw new InvalidOperationException("外部アプリから受け取った画像は埋め込みを選択してください。");
+            ImageFiles.Validate(insertFiles);
+        }
         dynamic shapes = com.Own(sheet.Shapes);
         var added = new List<object>();
         try
         {
-            foreach (var file in files)
+            foreach (var file in insertFiles)
             {
                 dynamic picture = com.Own(shapes.AddPicture(Path.GetFullPath(file), options.Kind == PictureKind.Linked ? -1 : 0,
                     options.Kind == PictureKind.Linked ? 0 : -1, left, top, -1, -1));
