@@ -36,8 +36,10 @@ internal static partial class Program
         using var overlay = new DropOverlay();
         ReceivedImageBatch? accepted = null;
         bool accept = false;
-        overlay.FilesDropped += (paths, _, _) =>
+        bool shiftAtDrop = false;
+        overlay.FilesDropped += (paths, _, shift) =>
         {
+            shiftAtDrop = shift;
             if (!accept) return false;
             accepted = ReceivedImageBatch.Capture(paths, root);
             Check(File.Exists(accepted.Images.Single()), "Copy応答より先に画像を確保");
@@ -46,15 +48,19 @@ internal static partial class Program
         var data = new DataObject(); data.SetData(DataFormats.FileDrop, false, new[] { image });
         void Enter() => typeof(Control).GetMethod("OnDragEnter", BindingFlags.NonPublic | BindingFlags.Instance)!
             .Invoke(overlay, [new DragEventArgs(data, 1, 10, 20, DragDropEffects.Copy | DragDropEffects.Move, DragDropEffects.None)]);
-        DragEventArgs Drop()
+        DragEventArgs Drop(int keyState = 0)
         {
-            var args = new DragEventArgs(data, 0, 10, 20, DragDropEffects.Copy | DragDropEffects.Move, DragDropEffects.Move);
+            var args = new DragEventArgs(data, keyState, 10, 20, DragDropEffects.Copy | DragDropEffects.Move, DragDropEffects.Move);
             typeof(Control).GetMethod("OnDragDrop", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(overlay, [args]);
             return args;
         }
         Enter(); Check(Drop().Effect == DragDropEffects.None, "画像を確保できなければCopy成功を応答しない");
         accept = true; Enter();
         Check(Drop().Effect == DragDropEffects.Copy && accepted is not null, "画像を確保した場合だけCopyを応答");
+        accepted?.Dispose();
+        Check(!shiftAtDrop, "通常のドロップはShiftなしとして受け取る");
+        Enter();
+        Check(Drop(4).Effect == DragDropEffects.Copy && shiftAtDrop, "ドロップ時のShiftを受け取る");
         accepted?.Dispose();
 
         // 実際のDropから呼ばれるサービス経路でもInvalidDataExceptionをOLEへ漏らさない。
