@@ -36,7 +36,7 @@ internal static partial class Program
         using var overlay = new DropOverlay();
         ReceivedImageBatch? accepted = null;
         bool accept = false;
-        overlay.FilesDropped += (paths, _) =>
+        overlay.FilesDropped += (paths, _, _) =>
         {
             if (!accept) return false;
             accepted = ReceivedImageBatch.Capture(paths, root);
@@ -62,10 +62,10 @@ internal static partial class Program
         int reports = 0;
         using var service = new ExcelDropService(dispatcher, (_, isFailure) => { if (isFailure) reports++; }, startTimer: false);
         var queue = typeof(ExcelDropService).GetMethod("QueueInsert", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        Check(queue.Invoke(service, [new[] { invalid }, Point.Empty]) is false && !service.Busy && reports == 1,
+        Check(queue.Invoke(service, [new[] { invalid }, Point.Empty, false]) is false && !service.Busy && reports == 1,
             "壊れた画像はサービス経路でも例外を漏らさず受信拒否");
         string empty = Path.Combine(output, "empty.png"); File.WriteAllBytes(empty, []);
-        Check(queue.Invoke(service, [new[] { empty }, Point.Empty]) is false && !service.Busy && reports == 2,
+        Check(queue.Invoke(service, [new[] { empty }, Point.Empty, false]) is false && !service.Busy && reports == 2,
             "空画像の検証例外でもCopy成功や処理中状態にしない");
     }
 }

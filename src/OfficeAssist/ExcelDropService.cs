@@ -60,7 +60,7 @@ internal sealed class ExcelDropService : IDisposable
         overlay.Show();
     }
 
-    bool QueueInsert(string[] files, Point point)
+    bool QueueInsert(string[] files, Point point, bool showOptions)
     {
         if (Busy || !enabled) return false;
         suppressed = true;
@@ -77,7 +77,7 @@ internal sealed class ExcelDropService : IDisposable
         try { dispatcher.BeginInvoke(new Action(() =>
         {
             using var received = batch;
-            try { var result = ExcelPictureInserter.InsertInteractive(handle, point, received.Images, received.Originals, allowLinks); if (result is not null) report(result, false); }
+            try { var result = ExcelPictureInserter.InsertInteractive(handle, point, received.Images, received.Originals, allowLinks, showOptions); if (result is not null) report(result, false); }
             catch (Exception ex)
             {
                 var message = ex is System.Runtime.InteropServices.COMException

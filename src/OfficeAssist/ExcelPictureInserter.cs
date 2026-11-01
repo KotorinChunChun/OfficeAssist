@@ -19,11 +19,11 @@ internal static class ExcelPictureInserter
         InsertCore(sheetHandle, screenPoint, files, false)!;
 
     internal static string? InsertInteractive(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files,
-        IReadOnlyList<string>? linkedFiles = null, bool allowLinkedImages = true) =>
-        InsertCore(sheetHandle, screenPoint, files, true, linkedFiles, allowLinkedImages);
+        IReadOnlyList<string>? linkedFiles = null, bool allowLinkedImages = true, bool showOptions = false) =>
+        InsertCore(sheetHandle, screenPoint, files, true, linkedFiles, allowLinkedImages, showOptions);
 
     static string? InsertCore(nint sheetHandle, Point screenPoint, IReadOnlyList<string> files, bool interactive,
-        IReadOnlyList<string>? linkedFiles = null, bool allowLinkedImages = true)
+        IReadOnlyList<string>? linkedFiles = null, bool allowLinkedImages = true, bool showOptions = false)
     {
         ImageFiles.Validate(files);
         if (!Native.IsWindow(sheetHandle) || Native.ClassName(sheetHandle) != "EXCEL7"
@@ -55,14 +55,18 @@ internal static class ExcelPictureInserter
         string sheetName = (string)sheet.Name;
         dynamic selected = com.Own(window.RangeSelection);
         dynamic areas = com.Own(selected.Areas);
-        if (interactive && (int)areas.Count != 1) throw new InvalidOperationException("連続したセル範囲を選択してください。");
         string selectedAddress = (string)selected.Address;
         InsertOptions options;
         if (interactive)
         {
-            using var dialog = new InsertOptionsForm(selectedAddress, files.Count, allowLinkedImages);
-            if (dialog.ShowDialog() != DialogResult.OK || dialog.Options is null) return null;
-            options = dialog.Options;
+            options = InsertSettings.Load();
+            if (showOptions)
+            {
+                using var dialog = new InsertOptionsForm(selectedAddress, files.Count, allowLinkedImages, options);
+                if (dialog.ShowDialog() != DialogResult.OK || dialog.Options is null) return null;
+                options = dialog.Options;
+                InsertSettings.Save(options);
+            }
             if (!Native.IsWindow(sheetHandle) || !Native.IsWindowEnabled(Native.GetAncestor(sheetHandle, 2)))
                 throw new InvalidOperationException("対象のExcelが閉じられたか、ダイアログを表示しています。");
             dynamic currentSheet = com.Own(window.ActiveSheet);
@@ -72,12 +76,20 @@ internal static class ExcelPictureInserter
             if ((bool)book.ReadOnly || (bool)sheet.ProtectContents || (bool)sheet.ProtectDrawingObjects)
                 throw new InvalidOperationException("読み取り専用ブックや保護されたシートには挿入できません。");
         }
-        else options = new InsertOptions(false, false, PictureKind.Embedded, []);
-        dynamic destination = options.UseSelection ? selected : anchor;
-        float left = (float)destination.Left, top = (float)destination.Top;
-        string address = (string)destination.Address;
+        else options = new InsertOptions(Destination.DropPosition, PictureKind.Embedded, []);
+        if (options.Kind == PictureKind.ImageFormula && options.Urls.Length != files.Count)
+            throw new InvalidOperationException("IMAGE関数には画像URLが必要です。Shiftを押しながらドロップし、URLを指定してください。");
+        var destinations = new List<object>();
+        if (options.Destination == Destination.DropPosition) destinations.Add(anchor);
+        else for (int i = 1; i <= (int)areas.Count; i++) destinations.Add(com.Own(areas.Item(i)));
+        string address = options.Destination == Destination.DropPosition ? (string)anchor.Address : selectedAddress;
+        var assignments = new List<(int Area, int File)>();
+        if (files.Count == 1)
+            for (int i = 0; i < destinations.Count; i++) assignments.Add((i, 0));
+        else
+            for (int i = 0; i < files.Count; i++) assignments.Add((i % destinations.Count, i));
         if (options.Kind == PictureKind.ImageFormula)
-            return InsertFormulas(com, sheet, destination, options, files.Count, sheetName, address);
+            return InsertFormulas(com, destinations, assignments, options, sheetName, address);
         var insertFiles = options.Kind == PictureKind.Linked ? linkedFiles ?? files : files;
         if (options.Kind == PictureKind.Linked)
         {
@@ -88,20 +100,28 @@ internal static class ExcelPictureInserter
         var added = new List<object>();
         try
         {
-            foreach (var file in insertFiles)
+            var offsets = new int[destinations.Count];
+            var nextTops = new float[destinations.Count];
+            foreach (var (area, fileIndex) in assignments)
             {
-                dynamic picture = com.Own(shapes.AddPicture(Path.GetFullPath(file), options.Kind == PictureKind.Linked ? -1 : 0,
+                dynamic destination = destinations[area];
+                int countInArea = assignments.Count(x => x.Area == area);
+                int offset = offsets[area]++;
+                float left = (float)destination.Left, top = (float)destination.Top;
+                if (options.Destination == Destination.SelectionRange) top += (float)destination.Height / countInArea * offset;
+                else if (offset > 0) top = nextTops[area];
+                dynamic picture = com.Own(shapes.AddPicture(Path.GetFullPath(insertFiles[fileIndex]), options.Kind == PictureKind.Linked ? -1 : 0,
                     options.Kind == PictureKind.Linked ? 0 : -1, left, top, -1, -1));
                 added.Add(picture);
                 float width = (float)picture.Width, height = (float)picture.Height;
                 float ratio = interactive ? 1 : Math.Min(1, 480 / Math.Max(width, height));
-                if (options.FitSelection)
-                    ratio = Math.Min((float)selected.Width / width, ((float)selected.Height / files.Count) / height);
+                if (options.Destination == Destination.SelectionRange)
+                    ratio = Math.Min((float)destination.Width / width, ((float)destination.Height / countInArea) / height);
                 if (!float.IsFinite(ratio) || ratio <= 0) throw new InvalidOperationException("選択範囲のサイズが不正です。");
                 picture.LockAspectRatio = -1;
                 picture.Width = width * ratio;
                 picture.Placement = 3; // xlFreeFloating: 行列サイズ変更で縦横比を壊さない。
-                top += options.FitSelection ? (float)selected.Height / files.Count : height * ratio + 12;
+                nextTops[area] = top + height * ratio + 12;
             }
         }
         catch (Exception error)
@@ -116,23 +136,28 @@ internal static class ExcelPictureInserter
                 ? "画像を挿入できませんでした。今回の追加は取り消しました。Excelの編集状態と画像を確認してください。"
                 : "挿入に失敗し、一部の画像を取り消せませんでした。対象シートを確認してください。", error);
         }
-        return $"{files.Count}枚を挿入しました（{sheetName} {address}）。";
+        return $"{assignments.Count}枚を挿入しました（{sheetName} {address}）。";
     }
 
-    static string InsertFormulas(ComScope com, dynamic sheet, dynamic destination, InsertOptions options, int count, string sheetName, string address)
+    static string InsertFormulas(ComScope com, List<object> destinations, List<(int Area, int File)> assignments, InsertOptions options, string sheetName, string address)
     {
-        if (options.Urls.Length != count) throw new InvalidOperationException("画像URLの件数が一致しません。");
-        dynamic cells = com.Own(destination.Cells);
-        dynamic rows = com.Own(destination.Rows);
-        dynamic columns = com.Own(destination.Columns);
-        int rowCount = (int)rows.Count, columnCount = (int)columns.Count;
-        if (options.UseSelection && (long)rowCount * columnCount < count)
-            throw new InvalidOperationException("選択範囲のセル数が画像数より少ないため挿入できません。");
         var targets = new List<object>();
-        for (int i = 0; i < count; i++)
+        var offsets = new int[destinations.Count];
+        var addresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (area, _) in assignments)
         {
-            dynamic cell = com.Own(cells.Item(options.UseSelection ? i / columnCount + 1 : i + 1,
-                options.UseSelection ? i % columnCount + 1 : 1));
+            dynamic destination = destinations[area];
+            dynamic cells = com.Own(destination.Cells);
+            dynamic rows = com.Own(destination.Rows);
+            dynamic columns = com.Own(destination.Columns);
+            int rowCount = (int)rows.Count, columnCount = (int)columns.Count;
+            int offset = offsets[area]++;
+            bool withinRange = options.Destination == Destination.SelectionRange;
+            if (withinRange && (long)rowCount * columnCount <= offset)
+                throw new InvalidOperationException("選択範囲のセル数が画像数より少ないため挿入できません。");
+            dynamic cell = com.Own(cells.Item(withinRange ? offset / columnCount + 1 : offset + 1,
+                withinRange ? offset % columnCount + 1 : 1));
+            if (!addresses.Add((string)cell.Address)) throw new InvalidOperationException("IMAGE関数の挿入先が重複しています。選択範囲を変更してください。");
             if ((bool)cell.MergeCells || cell.Value2 is not null || (bool)cell.HasFormula)
                 throw new InvalidOperationException("結合セルや値の入ったセルにはIMAGE関数を挿入できません。空のセルを選択してください。");
             targets.Add(cell);
@@ -140,11 +165,11 @@ internal static class ExcelPictureInserter
         var written = new List<object>();
         try
         {
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < assignments.Count; i++)
             {
                 dynamic cell = targets[i];
-                string url = options.Urls[i].Replace("\"", "\"\"");
-                cell.Formula = "=IMAGE(\"" + url + "\",\"\"," + (options.FitSelection ? "0" : "2") + ")";
+                string url = options.Urls[assignments[i].File].Replace("\"", "\"\"");
+                cell.Formula = "=IMAGE(\"" + url + "\",\"\"," + (options.Destination == Destination.SelectionRange ? "0" : "2") + ")";
                 written.Add(cell);
             }
         }
@@ -155,6 +180,6 @@ internal static class ExcelPictureInserter
             throw new InvalidOperationException(restored ? "IMAGE関数を挿入できませんでした。今回の追加を取り消しました。"
                 : "IMAGE関数の挿入と取り消しに失敗しました。対象シートを確認してください。", ex);
         }
-        return $"{count}件のIMAGE関数を挿入しました（{sheetName} {address}）。";
+        return $"{assignments.Count}件のIMAGE関数を挿入しました（{sheetName} {address}）。";
     }
 }
