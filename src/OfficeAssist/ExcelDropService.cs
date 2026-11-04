@@ -6,14 +6,15 @@ internal sealed class ExcelDropService : IDisposable
     readonly DropOverlay overlay = new();
     readonly Control dispatcher;
     readonly Action<string, bool> report;
-    bool wasDown, fromExplorer, suppressed, enabled = true;
+    bool wasDown, externalSource, suppressed, enabled = true;
+    bool allowLinkedImages;
     Point origin;
     nint target;
     int releasedTicks;
     internal bool Busy { get; private set; }
     internal bool Enabled { get => enabled; set { enabled = value; if (!value) { suppressed = true; overlay.Hide(); } } }
 
-    internal ExcelDropService(Control dispatcher, Action<string, bool> report)
+    internal ExcelDropService(Control dispatcher, Action<string, bool> report, bool startTimer = true)
     {
         this.dispatcher = dispatcher;
         this.report = report;
@@ -21,7 +22,7 @@ internal sealed class ExcelDropService : IDisposable
         overlay.Rejected += () => { suppressed = true; overlay.Hide(); };
         overlay.FilesDropped += QueueInsert;
         timer.Tick += (_, _) => Tick();
-        timer.Start();
+        if (startTimer) timer.Start();
     }
 
     void Tick()
@@ -31,18 +32,20 @@ internal sealed class ExcelDropService : IDisposable
         if (down && !wasDown)
         {
             origin = point;
-            fromExplorer = Native.IsExplorer(Native.WindowFromPoint(point));
+            nint source = Native.WindowFromPoint(point);
+            externalSource = Native.IsExternalImageDragSource(source);
+            allowLinkedImages = externalSource && Native.IsExplorer(source);
             suppressed = false;
         }
         wasDown = down;
         if (!down)
         {
             // OLE側のDropが先に処理される猶予を持たせる。
-            if (++releasedTicks >= 3) { overlay.Hide(); fromExplorer = false; }
+            if (++releasedTicks >= 3) { overlay.Hide(); externalSource = false; }
             return;
         }
         releasedTicks = 0;
-        if (!enabled || Busy || !fromExplorer || suppressed || (Native.GetAsyncKeyState(27) & 0x8000) != 0)
+        if (!enabled || Busy || !externalSource || suppressed || (Native.GetAsyncKeyState(27) & 0x8000) != 0)
         { overlay.Hide(); return; }
         if (Math.Abs(point.X - origin.X) < SystemInformation.DragSize.Width
             && Math.Abs(point.Y - origin.Y) < SystemInformation.DragSize.Height) return;
@@ -57,26 +60,51 @@ internal sealed class ExcelDropService : IDisposable
         overlay.Show();
     }
 
-    void QueueInsert(string[] files, Point point)
+    bool QueueInsert(string[] files, Point point, int keyState)
     {
-        var handle = target;
-        Busy = true;
+        if (Busy || !enabled) return false;
         suppressed = true;
+        var handle = target;
+        bool allowLinks = allowLinkedImages;
+        ReceivedImageBatch? batch = null;
+        IReadOnlyList<TabularData>? tables = null;
+        bool showOptions = false;
+        try
+        {
+            if (TabularFiles.Accepts(files)) tables = TabularFiles.Read(files);
+            else { showOptions = InsertSettings.IsPressed(InsertSettings.LoadModifier(), keyState); batch = ReceivedImageBatch.Capture(files); }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException
+            or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
+        { report("ファイルを受け取れませんでした: " + ex.Message, true); return false; }
+        Busy = true;
         overlay.Hide();
         // OLEのDrop呼出中にExcelへCOMを送るとビジーになるため、応答後にUIキューから実行する。
-        dispatcher.BeginInvoke(new Action(() =>
+        try { dispatcher.BeginInvoke(new Action(() =>
         {
-            try { var result = ExcelPictureInserter.InsertInteractive(handle, point, files); if (result is not null) report(result, false); }
+            using var received = batch;
+            try
+            {
+                var result = tables is not null ? ExcelTabularInserter.Insert(handle, point, tables)
+                    : ExcelPictureInserter.InsertInteractive(handle, point, received!.Images, received.Originals, allowLinks, showOptions);
+                if (result is not null)
+                {
+                    report(result.Warning is null ? result.Message : result.Message + Environment.NewLine + result.Warning, false);
+                    if (result.Warning is not null && tables is null) ExcelModalLock.ShowMessage(handle, result.Warning, WindowTitle.Create("ファイルの展開"), MessageBoxIcon.Warning);
+                }
+            }
             catch (Exception ex)
             {
                 var message = ex is System.Runtime.InteropServices.COMException
                     ? "Excelへ接続できません。セルの編集やダイアログを閉じ、通常権限のExcelへ再度ドロップしてください。"
                     : ex.Message;
                 report(message, true);
-                MessageBox.Show(message, WindowTitle.Create("画像の挿入"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ExcelModalLock.ShowMessage(handle, message, WindowTitle.Create("ファイルの展開"), MessageBoxIcon.Warning);
             }
             finally { Busy = false; }
-        }));
+        })); }
+        catch (InvalidOperationException) { batch?.Dispose(); Busy = false; return false; }
+        return true;
     }
 
     public void Dispose() { timer.Stop(); timer.Dispose(); overlay.Dispose(); }

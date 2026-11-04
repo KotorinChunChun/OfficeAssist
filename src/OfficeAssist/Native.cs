@@ -17,6 +17,7 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(nint hwnd, out Rect rect);
     [DllImport("user32.dll")] internal static extern bool IsWindowVisible(nint hwnd);
     [DllImport("user32.dll")] internal static extern bool IsWindowEnabled(nint hwnd);
+    [DllImport("user32.dll")] internal static extern bool EnableWindow(nint hwnd, bool enabled);
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint hwnd);
     [DllImport("user32.dll")] internal static extern bool EnumChildWindows(nint hwnd, EnumWindowProc callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(nint hwnd, StringBuilder name, int count);
@@ -30,6 +31,16 @@ internal static class Native
         return name.ToString();
     }
 
+    internal static bool IsExternalImageDragSource(nint hwnd)
+    {
+        if (hwnd == 0) return false;
+        nint root = GetAncestor(hwnd, 2 /* GA_ROOT */);
+        if (root == 0) return false;
+        GetWindowThreadProcessId(root, out uint pid);
+        return ImageDragOrigin.IsEligible(ClassName(root), pid, (uint)Environment.ProcessId);
+    }
+
+    // 受信可否には使わない。既存のExplorer起点に限り原本へのリンク選択を維持する。
     internal static bool IsExplorer(nint hwnd)
     {
         GetWindowThreadProcessId(hwnd, out uint pid);
