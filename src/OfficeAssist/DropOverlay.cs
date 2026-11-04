@@ -9,7 +9,7 @@ internal sealed class DropOverlay : BrandedForm
 
     internal DropOverlay()
     {
-        Text = WindowTitle.Create("画像ドロップ");
+        Text = WindowTitle.Create("ファイルドロップ");
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
@@ -20,7 +20,7 @@ internal sealed class DropOverlay : BrandedForm
         DragEnter += (_, e) =>
         {
             Receiving = true;
-            pendingFiles = ImageDropData.Read(e.Data, e.AllowedEffect);
+            pendingFiles = ExcelDropData.Read(e.Data, e.AllowedEffect);
             if (pendingFiles is not null)
                 e.Effect = DragDropEffects.Copy;
             else { e.Effect = DragDropEffects.None; pendingFiles = null; Rejected?.Invoke(); }

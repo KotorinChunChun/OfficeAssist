@@ -29,6 +29,7 @@ internal static partial class Program
         try
         {
             DropTests();
+            TabularTests(output);
             var image = Path.Combine(output, "01-blue.png");
             using (var bitmap = new Bitmap(240, 120))
             {

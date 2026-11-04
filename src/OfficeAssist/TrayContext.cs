@@ -14,7 +14,7 @@ internal sealed class TrayContext : ApplicationContext
     public TrayContext()
     {
         _ = window.Handle;
-        var toggle = new ToolStripMenuItem("Excelへの画像ドロップ") { Checked = true, CheckOnClick = true };
+        var toggle = new ToolStripMenuItem("Excelへのファイルドロップ") { Checked = true, CheckOnClick = true };
         menu.Items.Add("開く", null, (_, _) => ShowWindow());
         menu.Items.Add(toggle);
         menu.Items.Add("Excelドロップ設定", null, (_, _) => ShowSettings());
@@ -26,6 +26,7 @@ internal sealed class TrayContext : ApplicationContext
         dropService = new ExcelDropService(window, (message, failed) =>
         {
             window.SetResult(message);
+            if (failed) tray.ShowBalloonTip(5000, "OfficeAssist", message, ToolTipIcon.Warning);
         });
         window.FeatureChanged += enabled =>
         {
@@ -34,7 +35,7 @@ internal sealed class TrayContext : ApplicationContext
             window.SetResult(enabled ? "待機中" : "一時停止中");
         };
         endpoint = new ManagementEndpoint("office-assist", window, ShowWindow, Stop,
-            () => dropService.Busy ? "画像を挿入中です。" : settingsOpen ? "設定画面を表示中です。" : null);
+            () => dropService.Busy ? "ファイルを展開中です。" : settingsOpen ? "設定画面を表示中です。" : null);
     }
 
     void ShowWindow()

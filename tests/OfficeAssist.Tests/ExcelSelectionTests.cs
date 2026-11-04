@@ -34,6 +34,7 @@ internal static partial class Program
                 dynamic intersection = app.Intersect(selected, exhausted);
                 Check(intersection is null, "実Excelで全範囲を使い切ったら選択外へ移す");
                 if (intersection is not null) com.Own(intersection);
+                TabularExcelTests(com, window, sheet);
             }
             finally { book.Close(false); }
         }

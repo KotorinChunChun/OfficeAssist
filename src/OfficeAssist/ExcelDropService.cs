@@ -66,12 +66,17 @@ internal sealed class ExcelDropService : IDisposable
         suppressed = true;
         var handle = target;
         bool allowLinks = allowLinkedImages;
-        ReceivedImageBatch batch;
-        bool showOptions;
-        try { showOptions = InsertSettings.IsPressed(InsertSettings.LoadModifier(), keyState); batch = ReceivedImageBatch.Capture(files); }
+        ReceivedImageBatch? batch = null;
+        IReadOnlyList<TabularData>? tables = null;
+        bool showOptions = false;
+        try
+        {
+            if (TabularFiles.Accepts(files)) tables = TabularFiles.Read(files);
+            else { showOptions = InsertSettings.IsPressed(InsertSettings.LoadModifier(), keyState); batch = ReceivedImageBatch.Capture(files); }
+        }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException
             or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
-        { report("画像を受け取れませんでした: " + ex.Message, true); return false; }
+        { report("ファイルを受け取れませんでした: " + ex.Message, true); return false; }
         Busy = true;
         overlay.Hide();
         // OLEのDrop呼出中にExcelへCOMを送るとビジーになるため、応答後にUIキューから実行する。
@@ -80,11 +85,12 @@ internal sealed class ExcelDropService : IDisposable
             using var received = batch;
             try
             {
-                var result = ExcelPictureInserter.InsertInteractive(handle, point, received.Images, received.Originals, allowLinks, showOptions);
+                var result = tables is not null ? ExcelTabularInserter.Insert(handle, point, tables)
+                    : ExcelPictureInserter.InsertInteractive(handle, point, received!.Images, received.Originals, allowLinks, showOptions);
                 if (result is not null)
                 {
                     report(result.Warning is null ? result.Message : result.Message + Environment.NewLine + result.Warning, false);
-                    if (result.Warning is not null) MessageBox.Show(result.Warning, WindowTitle.Create("画像の挿入"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (result.Warning is not null) MessageBox.Show(result.Warning, WindowTitle.Create("ファイルの展開"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
             catch (Exception ex)
@@ -93,11 +99,11 @@ internal sealed class ExcelDropService : IDisposable
                     ? "Excelへ接続できません。セルの編集やダイアログを閉じ、通常権限のExcelへ再度ドロップしてください。"
                     : ex.Message;
                 report(message, true);
-                MessageBox.Show(message, WindowTitle.Create("画像の挿入"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(message, WindowTitle.Create("ファイルの展開"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { Busy = false; }
         })); }
-        catch (InvalidOperationException) { batch.Dispose(); Busy = false; return false; }
+        catch (InvalidOperationException) { batch?.Dispose(); Busy = false; return false; }
         return true;
     }
 

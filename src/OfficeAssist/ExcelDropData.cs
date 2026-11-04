@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace OfficeAssist;
 
-internal static class ImageDropData
+internal static class ExcelDropData
 {
     internal static string[]? Read(IDataObject? data, DragDropEffects allowed)
     {
@@ -10,7 +10,8 @@ internal static class ImageDropData
         try
         {
             if (!data.GetDataPresent(DataFormats.FileDrop, false)
-                || data.GetData(DataFormats.FileDrop, false) is not string[] paths || !ImageFiles.Accepts(paths)) return null;
+                || data.GetData(DataFormats.FileDrop, false) is not string[] paths
+                || (!ImageFiles.Accepts(paths) && !TabularFiles.Accepts(paths))) return null;
             return (string[])paths.Clone();
         }
         catch (Exception ex) when (ex is ExternalException or ArgumentException or InvalidOperationException or NotSupportedException)
