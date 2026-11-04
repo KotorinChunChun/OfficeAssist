@@ -4,7 +4,6 @@ namespace OfficeAssist;
 
 internal static class ExcelTabularInserter
 {
-    sealed record ExcelOwner(nint Handle) : IWin32Window;
     internal static ExcelPictureInserter.Result? Insert(nint handle, Point point, IReadOnlyList<TabularData> tables)
     {
         if (!Native.IsWindow(handle) || Native.ClassName(handle) != "EXCEL7" || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2)))
@@ -28,17 +27,18 @@ internal static class ExcelTabularInserter
         dynamic originalSelection = com.Own(window.RangeSelection);
         string address = (string)originalSelection.Address;
         string sheetName = (string)originalSheet.Name;
-        using var dialog = new TabularImportForm(tables) { StartPosition = FormStartPosition.CenterParent };
-        var owner = new ExcelOwner(Native.GetAncestor(handle, 2));
-        if (dialog.ShowDialog(owner) != DialogResult.OK || dialog.Options is null) return null;
-        if (!Native.IsWindow(handle) || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2))) throw new InvalidOperationException("対象Excelを確認できません。もう一度ドロップしてください。");
-        dynamic currentSheet = com.Own(window.ActiveSheet);
-        dynamic currentBook = com.Own(currentSheet.Parent);
-        dynamic currentSelection = com.Own(window.RangeSelection);
-        if ((string)currentSheet.Name != sheetName || (string)currentBook.FullName != (string)originalBook.FullName || (string)currentSelection.Address != address)
-            throw new InvalidOperationException("設定中にブック・シート・選択範囲が変わりました。もう一度ドロップしてください。");
-        dynamic app = com.Own(window.Application);
-        return Import(com, app, window, tables, dialog.Options);
+        var owner = new ExcelWindowOwner(Native.GetAncestor(handle, 2));
+        using var modalLock = new ExcelModalLock(owner.Handle);
+        using var dialog = new TabularImportForm(tables, options =>
+        {
+            if (!Native.IsWindow(handle)) throw new InvalidOperationException("対象Excelを確認できません。もう一度ドロップしてください。");
+            dynamic currentSheet = com.Own(window.ActiveSheet), currentBook = com.Own(currentSheet.Parent), currentSelection = com.Own(window.RangeSelection);
+            if ((string)currentSheet.Name != sheetName || (string)currentBook.FullName != (string)originalBook.FullName || (string)currentSelection.Address != address)
+                throw new InvalidOperationException("設定中にブック・シート・選択範囲が変わりました。もう一度ドロップしてください。");
+            dynamic app = com.Own(window.Application);
+            return Import(com, app, window, tables, options);
+        }) { StartPosition = FormStartPosition.CenterParent };
+        return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Result : null;
     }
 
     internal static ExcelPictureInserter.Result Import(ComScope com, dynamic app, object? sourceWindow, IReadOnlyList<TabularData> tables, TabularImportOptions options)

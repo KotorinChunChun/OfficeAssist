@@ -38,14 +38,24 @@ internal sealed class TabularImportForm : BrandedForm
     readonly ToolTip tips = new();
     readonly IReadOnlyList<TabularData> tables;
     readonly TabularImportSelection selection;
+    readonly Func<TabularImportOptions, ExcelPictureInserter.Result>? execute;
+    readonly Action<IWin32Window, string, MessageBoxIcon> showMessage;
+    readonly Button import = new() { Text = "取り込む", AutoSize = true };
+    readonly Button cancel = new() { Text = "キャンセル", AutoSize = true, DialogResult = DialogResult.Cancel };
+    bool working;
     int SelectedFile => files.SelectedIndex;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal TabularImportOptions? Options { get; private set; }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal ExcelPictureInserter.Result? Result { get; private set; }
 
-    internal TabularImportForm(IReadOnlyList<TabularData> tables)
+    internal TabularImportForm(IReadOnlyList<TabularData> tables, Func<TabularImportOptions, ExcelPictureInserter.Result>? execute = null,
+        Action<IWin32Window, string, MessageBoxIcon>? showMessage = null)
     {
         if (tables.Count == 0) throw new ArgumentException("ファイルがありません。", nameof(tables));
         this.tables = tables; selection = new(tables);
+        this.execute = execute;
+        this.showMessage = showMessage ?? ((owner, message, icon) => MessageBox.Show(owner, message, Text, MessageBoxButtons.OK, icon));
         Text = WindowTitle.Create("CSV・TSVの取り込み"); StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(1020, 600); MinimumSize = new Size(780, 440);
         MinimizeBox = false; MaximizeBox = true; ShowInTaskbar = false; TopMost = true; Font = new Font("Yu Gothic UI", 10);
@@ -85,22 +95,48 @@ internal sealed class TabularImportForm : BrandedForm
         header.CheckedChanged += (_, _) => { selection.SetHeader(header.Checked); Populate(); };
         applyToAll.CheckedChanged += (_, _) => { selection.SetApplyToAll(applyToAll.Checked, SelectedFile); Populate(); };
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
-        var cancel = new Button { Text = "キャンセル", AutoSize = true, DialogResult = DialogResult.Cancel };
-        var import = new Button { Text = "取り込む", AutoSize = true };
         buttons.Controls.AddRange([cancel, import]);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 1, RowCount = 5 };
         foreach (int height in new[] { 44, 44, 118, 0, 42 }) layout.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
         layout.Controls.Add(top, 0, 0); layout.Controls.Add(fileBar, 0, 1); layout.Controls.Add(settingsViewport, 0, 2);
         layout.Controls.Add(preview, 0, 3); layout.Controls.Add(buttons, 0, 4); Controls.Add(layout); CancelButton = cancel;
-        import.Click += (_, _) =>
+        import.Click += (_, _) => TryImport();
+        FormClosing += (_, e) => { if (working && e.CloseReason == CloseReason.UserClosing && DialogResult != DialogResult.OK) e.Cancel = true; };
+        Populate();
+    }
+
+    internal bool TryImport()
+    {
+        if (working) return false;
+        working = true; import.Enabled = cancel.Enabled = false; UseWaitCursor = true;
+        Control[] editors = [destination, files, header, applyToAll, settingsViewport, preview];
+        foreach (var editor in editors) editor.Enabled = false;
+        try
         {
             var options = selection.CreateOptions((ImportDestination)destination.SelectedIndex);
-            try { for (int t = 0; t < tables.Count; t++) tables[t].ExcelValues(options.Types[t], options.Header); }
-            catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
-            { MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            Options = options; DialogResult = DialogResult.OK; Close();
-        };
-        Populate();
+            for (int t = 0; t < tables.Count; t++) tables[t].ExcelValues(options.Types[t], options.Header);
+            var result = execute?.Invoke(options);
+            if (result?.Warning is not null) { UseWaitCursor = false; showMessage(this, result.Warning, MessageBoxIcon.Warning); }
+            Options = options; Result = result; DialogResult = DialogResult.OK; Close();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DialogResult = DialogResult.None;
+            UseWaitCursor = false;
+            if (Visible) { BringToFront(); Activate(); }
+            showMessage(this, ex.Message, MessageBoxIcon.Warning);
+            return false;
+        }
+        finally
+        {
+            working = false;
+            if (!IsDisposed)
+            {
+                import.Enabled = cancel.Enabled = true; UseWaitCursor = false;
+                foreach (var editor in editors) editor.Enabled = true;
+            }
+        }
     }
 
     void Populate()

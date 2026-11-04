@@ -90,7 +90,7 @@ internal sealed class ExcelDropService : IDisposable
                 if (result is not null)
                 {
                     report(result.Warning is null ? result.Message : result.Message + Environment.NewLine + result.Warning, false);
-                    if (result.Warning is not null) MessageBox.Show(result.Warning, WindowTitle.Create("ファイルの展開"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (result.Warning is not null && tables is null) ExcelModalLock.ShowMessage(handle, result.Warning, WindowTitle.Create("ファイルの展開"), MessageBoxIcon.Warning);
                 }
             }
             catch (Exception ex)
@@ -99,7 +99,7 @@ internal sealed class ExcelDropService : IDisposable
                     ? "Excelへ接続できません。セルの編集やダイアログを閉じ、通常権限のExcelへ再度ドロップしてください。"
                     : ex.Message;
                 report(message, true);
-                MessageBox.Show(message, WindowTitle.Create("ファイルの展開"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ExcelModalLock.ShowMessage(handle, message, WindowTitle.Create("ファイルの展開"), MessageBoxIcon.Warning);
             }
             finally { Busy = false; }
         })); }
