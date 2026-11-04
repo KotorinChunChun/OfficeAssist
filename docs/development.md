@@ -18,6 +18,20 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj
 
 ## 検証
 
+CSV取り込みCLIは常駐アプリの排他制御とは独立して新規Excelプロセスを作り、新しいブックへ展開します。全値を読み戻して照合し、`--show`指定時はブックを閉じずに表示します。保存先と報告先が既に存在する場合は上書きしません。
+
+```powershell
+dotnet run --project src/OfficeAssist/OfficeAssist.csproj -c Release -- --import-table --new-book --header auto --show --save-as C:\path\確認.xlsx --report C:\path\result.json -- C:\path\source.csv
+```
+
+`--header`は`auto`・`yes`・`no`を指定します。列形式を上書きする場合は`--types text-format,date,number,general,text-quote`のように全列分をカンマ区切りで指定します。複数ファイルの場合も同じ列数・形式を適用します。未指定なら各ファイルの列から推定します。`--save-as`を省略した`--show`も使用できます。`--show`を省略する場合は保存先を必須とし、保存・読戻し後に専用Excelを終了します。報告には照合結果、ブックのパス、PID、列形式と先頭10行・20列の値・書式・PrefixCharacterを記録します。個人データを使う場合は報告も公開しないでください。
+
+`--selection-com`は専用の非表示Excelで、既存データとの衝突、新規ブック・新規シート、列形式と引用符の有無を検証します。
+
+```powershell
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --selection-com dev/history/v0.2.1/logs/column-check
+```
+
 ```powershell
 dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -- dev/history/v0.1.0/logs/unit
 dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -- --excel dev/history/v0.1.0/logs/com
