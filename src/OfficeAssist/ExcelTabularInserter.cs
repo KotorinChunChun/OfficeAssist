@@ -84,7 +84,8 @@ internal static class ExcelTabularInserter
                 }
                 sheet.Activate(); dynamic cell = com.Own(sheet.Range["A1"]); cell.Select();
                 dynamic window = com.Own(app.ActiveWindow);
-                InsertIntoWindow(com, window, new[] { tables[t] }, new TabularImportOptions(ImportDestination.Selection, [options.Types[t]], options.Header));
+                InsertIntoWindow(com, window, new[] { tables[t] }, new TabularImportOptions(ImportDestination.Selection, [options.Types[t]], options.Header)
+                { DecimalPlaces = [Enumerable.Range(0, tables[t].ColumnCount).Select(c => options.Decimals(t, c)).ToArray()] });
             }
             return new($"{tables.Count}ファイルを{(options.Destination == ImportDestination.NewBook ? "新しいブック" : "新しいシート")}に取り込みました（{book.Name}）。");
         }
@@ -107,7 +108,11 @@ internal static class ExcelTabularInserter
     static void Validate(IReadOnlyList<TabularData> tables, TabularImportOptions options)
     {
         if (tables.Count == 0 || tables.Count != options.Types.Length || !Enum.IsDefined(options.Destination)) throw new InvalidDataException("取り込み設定が不正です。");
-        for (int t = 0; t < tables.Count; t++) tables[t].ExcelValues(options.Types[t], options.Header);
+        for (int t = 0; t < tables.Count; t++)
+        {
+            tables[t].ExcelValues(options.Types[t], options.Header);
+            for (int c = 0; c < tables[t].ColumnCount; c++) options.Decimals(t, c);
+        }
     }
 
     internal static ExcelPictureInserter.Result InsertIntoWindow(ComScope com, dynamic window, IReadOnlyList<TabularData> tables, TabularImportOptions? settings = null)
@@ -174,13 +179,13 @@ internal static class ExcelTabularInserter
                         for (int r = 1; r <= tables[i].RowCount; r++) { dynamic cell = com.Own(columnCells.Item(r, 1)); formats.Add((cell, (object)cell.NumberFormat)); }
                     }
                     var type = options.Types[i][c];
+                    string format = ColumnConversion.Format(type, options.Decimals(i, c));
                     try
                     {
                         if (type is ColumnType.General or ColumnType.TextQuote) column.NumberFormatLocal = (string)app.International[26]; // xlGeneralFormatName
-                        else if (type == ColumnType.Date && !Enumerable.Range(0, tables[i].RowCount).Any(r => values[i][r, c] is double n && n % 1 != 0)) column.NumberFormat = "yyyy/mm/dd";
-                        else column.NumberFormat = ColumnConversion.Format(type);
+                        else column.NumberFormat = format;
                     }
-                    catch (COMException ex) { throw new InvalidOperationException($"列{c + 1}の書式（{ColumnConversion.Format(type)}）を設定できません。", ex); }
+                    catch (COMException ex) { throw new InvalidOperationException($"列{c + 1}の書式（{format}）を設定できません。", ex); }
                     dynamic cells = com.Own(column.Cells);
                     for (int r = 0; r < tables[i].RowCount; r++)
                     {

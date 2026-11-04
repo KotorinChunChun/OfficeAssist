@@ -14,7 +14,7 @@ internal static class TabularImportCli
         {
             int separator = Array.IndexOf(args, "--");
             if (separator < 0 || separator == args.Length - 1) throw new ArgumentException("-- の後にCSV・TSVを指定してください。");
-            string? report = null, saveAs = null, typeList = null;
+            string? report = null, saveAs = null, typeList = null, decimalsList = null;
             bool show = false; bool? header = null;
             for (int i = 0; i < separator; i++)
             {
@@ -26,6 +26,7 @@ internal static class TabularImportCli
                     case "--report": report = Path.GetFullPath(Value()); break;
                     case "--save-as": saveAs = Path.GetFullPath(Value()); break;
                     case "--types": typeList = Value(); break;
+                    case "--decimals": decimalsList = Value(); break;
                     case "--header": header = Value() switch { "yes" => true, "no" => false, "auto" => null, _ => throw new ArgumentException("headerはauto・yes・noです。") }; break;
                     default: throw new ArgumentException("未対応のオプションです: " + args[i]);
                 }
@@ -41,12 +42,21 @@ internal static class TabularImportCli
                 {
                     "text-format" => ColumnType.TextFormat, "text-quote" => ColumnType.TextQuote,
                     "date" => ColumnType.Date, "general" => ColumnType.General, "number" => ColumnType.Number,
-                    _ => throw new ArgumentException("列形式はtext-format,text-quote,date,general,numberで指定してください。")
+                    "date-weekday" => ColumnType.DateWeekday, "datetime" => ColumnType.DateTime, "time" => ColumnType.Time,
+                    "grouped-number" => ColumnType.GroupedNumber, "percent" => ColumnType.Percent, "yen" => ColumnType.Yen, "duration" => ColumnType.Duration,
+                    _ => throw new ArgumentException("列形式の指定が不正です。")
                 }).ToArray();
                 if (tables.Any(t => t.ColumnCount != types.Length)) throw new ArgumentException("列形式の数がファイルの列数と一致しません。");
-                options = options with { Types = tables.Select(_ => types.ToArray()).ToArray() };
+                options = options with { Types = tables.Select(_ => types.ToArray()).ToArray(), DecimalPlaces = tables.Select(t => Enumerable.Range(0, t.ColumnCount)
+                    .Select(c => ColumnConversion.InferDecimals(t.Rows.Skip(options.Header ? 1 : 0).Select(r => c < r.Length ? r[c] : ""), types[c])).ToArray()).ToArray() };
             }
-            for (int t = 0; t < tables.Count; t++) tables[t].ExcelValues(options.Types[t], options.Header);
+            if (decimalsList is not null)
+            {
+                int[] decimals = decimalsList.Split(',').Select(s => int.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                if (decimals.Any(d => d is < 0 or > 15) || tables.Any(t => t.ColumnCount != decimals.Length)) throw new ArgumentException("--decimalsは全列分の0～15の整数を指定してください。");
+                options = options with { DecimalPlaces = tables.Select(_ => decimals.ToArray()).ToArray() };
+            }
+            for (int t = 0; t < tables.Count; t++) { tables[t].ExcelValues(options.Types[t], options.Header); for (int c = 0; c < tables[t].ColumnCount; c++) options.Decimals(t, c); }
             var existing = Process.GetProcessesByName("EXCEL").Select(p => { using (p) return p.Id; }).ToHashSet();
             dynamic app = com.Own(Activator.CreateInstance(Type.GetTypeFromProgID("Excel.Application")!)!);
             Native.GetWindowThreadProcessId((nint)(int)app.Hwnd, out uint pid);
@@ -64,6 +74,7 @@ internal static class TabularImportCli
                 var values = raw as Array;
                 if (!(range.HasFormula is bool formulas) || formulas) throw new InvalidOperationException("読戻しで意図しない数式を検出しました。");
                 dynamic cells = com.Own(range.Cells);
+                dynamic columns = com.Own(range.Columns); columns.AutoFit();
                 var sample = new List<object>();
                 for (int r = 0; r < tables[t].RowCount; r++)
                     for (int c = 0; c < tables[t].ColumnCount; c++)
@@ -77,12 +88,11 @@ internal static class TabularImportCli
                         if (r < 10 && c < 20)
                         {
                             dynamic cell = com.Own(cells.Item(r + 1, c + 1));
-                            sample.Add(new { row = r + 1, column = c + 1, value = actual, format = (string)cell.NumberFormat, prefix = (string)cell.PrefixCharacter });
+                            sample.Add(new { row = r + 1, column = c + 1, value = actual, format = (string)cell.NumberFormat, prefix = (string)cell.PrefixCharacter, display = (string)cell.Text });
                         }
                     }
-                dynamic columns = com.Own(range.Columns); columns.AutoFit();
                 sheetReports.Add(new { name = (string)sheet.Name, rows = tables[t].RowCount, columns = tables[t].ColumnCount,
-                    types = options.Types[t].Select(type => ColumnConversion.Labels[(int)type]).ToArray(), sample });
+                    types = options.Types[t].Select(type => ColumnConversion.Labels[(int)type]).ToArray(), decimals = Enumerable.Range(0, tables[t].ColumnCount).Select(c => options.Decimals(t, c)).ToArray(), sample });
             }
             if (saveAs is not null) { Directory.CreateDirectory(Path.GetDirectoryName(saveAs)!); book.SaveAs(saveAs, 51); }
             var output = new { verified = true, pid, workbook = (string)book.FullName, header = options.Header, message = result.Message, sheets = sheetReports };

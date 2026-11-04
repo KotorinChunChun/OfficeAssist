@@ -33,6 +33,8 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj -c Release -- --import
 
 `--header`は`auto`・`yes`・`no`を指定します。列形式を上書きする場合は`--types text-format,date,number,general,text-quote`のように全列分をカンマ区切りで指定します。複数ファイルの場合も同じ列数・形式を適用します。未指定なら各ファイルの列から推定します。`--save-as`を省略した`--show`も使用できます。`--show`を省略する場合は保存先を必須とし、保存・読戻し後に専用Excelを終了します。報告には照合結果、ブックのパス、PID、列形式と先頭10行・20列の値・書式・PrefixCharacterを記録します。個人データを使う場合は報告も公開しないでください。
 
+追加の列形式は`date-weekday,datetime,time,grouped-number,percent,yen,duration`です。`--decimals 0,2,0`のように全列分の桁数（0～15）を指定できます。省略時は値から小数桁を推定します。報告には小数桁と実際の表示文字列も含みます。
+
 `--selection-com`は専用の非表示Excelで、既存データとの衝突、新規ブック・新規シート、列形式と引用符の有無を検証します。
 
 ```powershell

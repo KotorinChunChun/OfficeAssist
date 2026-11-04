@@ -31,6 +31,7 @@ internal static partial class Program
             DropTests();
             TabularTests(output);
             ImportSelectionTests();
+            TabularFormatTests();
             if (args.Contains("--large-preview")) LargeImportPreviewTests(output);
             var image = Path.Combine(output, "01-blue.png");
             using (var bitmap = new Bitmap(240, 120))

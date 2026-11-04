@@ -30,7 +30,7 @@ internal sealed class TabularImportForm : BrandedForm
     readonly CheckBox applyToAll = new() { Name = "ApplyToAllFiles", Text = "すべてのファイルに適用", AutoSize = true };
     readonly CheckBox header = new() { Text = "先頭行を見出しとして扱う", AutoSize = true };
     readonly Panel settingsViewport = new() { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
-    readonly Panel settings = new() { Height = 82 };
+    readonly Panel settings = new() { Height = 112 };
     readonly DataGridView preview = new() { Name = "ImportDataPreview", Dock = DockStyle.Fill, ReadOnly = true, VirtualMode = true,
         AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToOrderColumns = false,
         AllowUserToResizeColumns = false, AllowUserToResizeRows = false, RowHeadersWidth = RowHeaderWidth,
@@ -89,7 +89,7 @@ internal sealed class TabularImportForm : BrandedForm
         var import = new Button { Text = "取り込む", AutoSize = true };
         buttons.Controls.AddRange([cancel, import]);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 1, RowCount = 5 };
-        foreach (int height in new[] { 44, 44, 88, 0, 42 }) layout.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
+        foreach (int height in new[] { 44, 44, 118, 0, 42 }) layout.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
         layout.Controls.Add(top, 0, 0); layout.Controls.Add(fileBar, 0, 1); layout.Controls.Add(settingsViewport, 0, 2);
         layout.Controls.Add(preview, 0, 3); layout.Controls.Add(buttons, 0, 4); Controls.Add(layout); CancelButton = cancel;
         import.Click += (_, _) =>
@@ -140,8 +140,19 @@ internal sealed class TabularImportForm : BrandedForm
                 var label = new Label { Text = $"{c + 1}: {title}", AutoEllipsis = true, Left = c * ColumnWidth - offset + 4, Top = 4, Width = ColumnWidth - 8, Height = 27 };
                 var type = new ImportComboBox { Name = "ColumnType" + c, AccessibleName = $"列{c + 1}の形式", Left = label.Left, Top = 34, Width = ColumnWidth - 8, DropDownWidth = ColumnWidth + 40 };
                 type.Items.AddRange(ColumnConversion.Labels); type.SelectedIndex = (int)selection.Types[SelectedFile][c];
-                type.SelectedIndexChanged += (_, _) => { if (type.SelectedIndex >= 0) selection.SetType(SelectedFile, columnIndex, (ColumnType)type.SelectedIndex); };
-                tips.SetToolTip(label, title); settings.Controls.Add(label); settings.Controls.Add(type);
+                var digitsLabel = new Label { Text = "小数点以下桁数", Left = label.Left, Top = 72, Width = 136, AutoSize = false, Height = 27 };
+                var digits = new NumericUpDown { Name = "ColumnDecimals" + c, AccessibleName = $"列{c + 1}の小数点以下桁数", Left = label.Left + 144, Top = 68, Width = 80, Minimum = 0, Maximum = 15,
+                    Value = selection.DecimalPlaces[SelectedFile][c], Enabled = ColumnConversion.IsNumeric(selection.Types[SelectedFile][c]) };
+                digitsLabel.Enabled = digits.Enabled;
+                type.SelectedIndexChanged += (_, _) =>
+                {
+                    if (type.SelectedIndex < 0) return;
+                    var chosen = (ColumnType)type.SelectedIndex; selection.SetType(SelectedFile, columnIndex, chosen);
+                    digits.Enabled = digitsLabel.Enabled = ColumnConversion.IsNumeric(chosen); digits.Value = selection.DecimalPlaces[SelectedFile][columnIndex];
+                };
+                digits.ValueChanged += (_, _) => selection.SetDecimals(SelectedFile, columnIndex, (int)digits.Value);
+                tips.SetToolTip(digits, "0なら小数点を表示しません。保存する数値は変更しません。");
+                tips.SetToolTip(label, title); settings.Controls.AddRange([label, type, digitsLabel, digits]);
             }
         }
         finally { settings.ResumeLayout(); }
