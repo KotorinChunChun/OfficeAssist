@@ -48,7 +48,8 @@ internal sealed class TabularImportForm : BrandedForm
         this.tables = tables; selection = new(tables);
         Text = WindowTitle.Create("CSV・TSVの取り込み"); StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(1020, 600); MinimumSize = new Size(780, 440);
-        MinimizeBox = false; MaximizeBox = false; ShowInTaskbar = false; Font = new Font("Yu Gothic UI", 10);
+        MinimizeBox = false; MaximizeBox = true; ShowInTaskbar = false; TopMost = true; Font = new Font("Yu Gothic UI", 10);
+        Shown += (_, _) => { BringToFront(); Activate(); };
         destination.Items.AddRange(["新しいブック", "新しいシート", "選択中のセル"]); destination.SelectedIndex = (int)ImportDestination.Selection;
         files.Items.AddRange(tables.Select(t => (object)t.Name).ToArray()); files.SelectedIndex = 0;
         header.Checked = selection.Header;

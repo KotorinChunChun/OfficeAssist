@@ -18,6 +18,13 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj
 
 ## 検証
 
+大型プレビュー用サンプルは次のコマンドで作成します。40列と64列、それぞれ見出し＋1500行で、２ファイル合計156104セルです。番号・日付・数値・日本語・改行・引用符・数式風文字列・空欄を含み、既存ファイルは上書きしません。
+
+```powershell
+./dev/scripts/New-TabularPreviewSamples.ps1 -OutputDirectory ./dev/history/v0.2.1/logs/large-table-20261105/files
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --large-preview dev/history/v0.2.1/logs/large-table-20261105
+```
+
 CSV取り込みCLIは常駐アプリの排他制御とは独立して新規Excelプロセスを作り、新しいブックへ展開します。全値を読み戻して照合し、`--show`指定時はブックを閉じずに表示します。保存先と報告先が既に存在する場合は上書きしません。
 
 ```powershell

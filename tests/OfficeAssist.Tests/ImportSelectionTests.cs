@@ -34,4 +34,22 @@ internal static partial class Program
         file.SelectedIndex = 0;
         Check(((ComboBox)form.Controls.Find("ColumnType0", true).Single()).SelectedIndex == (int)ColumnType.TextQuote, "ファイルを切り替えても列形式を保持する");
     }
+
+    static void LargeImportPreviewTests(string output)
+    {
+        var tables = TabularFiles.Read([Path.Combine(output,"files","01-wide-40cols.csv"), Path.Combine(output,"files","02-wide-64cols.tsv")]);
+        Check(tables[0].ColumnCount == 40 && tables[1].ColumnCount == 64 && tables.All(t => t.RowCount == 1501), "大型サンプルの列数と行数を保持");
+        Check(tables[0].Rows[1][0] == "000001" && tables[1].Rows[1500][0] == "001500" && tables[0].Rows[1][4] == "前半1\n後半1", "大型サンプルの先頭ゼロ・最終行・改行を保持");
+        using var form = new TabularImportForm(tables);
+        form.Size = new Size(1500, 900); _ = form.Handle; form.PerformLayout();
+        var files = (ComboBox)form.Controls.Find("ImportFile", true).Single();
+        var grid = (DataGridView)form.Controls.Find("ImportDataPreview", true).Single(); _ = grid.Handle;
+        Check(grid.Columns.Count == 40 && grid.RowCount == 1500, "大型プレビューを全行の仮想表示で構成");
+        files.SelectedIndex = 1; form.PerformLayout();
+        grid.HorizontalScrollingOffset = 64 * 240;
+        Check(grid.Columns.Count == 64 && (string?)grid.Rows[1499].Cells[0].Value == "001500", "ファイル切替後も64列の最終行へアクセス可能");
+        Check(form.Controls.Find("ColumnType63", true).Length == 1 && form.Controls.Find("ColumnType0", true).Length == 0,
+            "横スクロールで末尾列の設定だけを表示");
+        Check(form.Controls.Find("ColumnType63", true).Single().Parent!.Controls.OfType<ComboBox>().Count() < 10, "大型テーブルの設定コントロール数を表示範囲に制限");
+    }
 }

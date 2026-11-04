@@ -4,6 +4,7 @@ namespace OfficeAssist;
 
 internal static class ExcelTabularInserter
 {
+    sealed record ExcelOwner(nint Handle) : IWin32Window;
     internal static ExcelPictureInserter.Result? Insert(nint handle, Point point, IReadOnlyList<TabularData> tables)
     {
         if (!Native.IsWindow(handle) || Native.ClassName(handle) != "EXCEL7" || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2)))
@@ -27,8 +28,9 @@ internal static class ExcelTabularInserter
         dynamic originalSelection = com.Own(window.RangeSelection);
         string address = (string)originalSelection.Address;
         string sheetName = (string)originalSheet.Name;
-        using var dialog = new TabularImportForm(tables);
-        if (dialog.ShowDialog() != DialogResult.OK || dialog.Options is null) return null;
+        using var dialog = new TabularImportForm(tables) { StartPosition = FormStartPosition.CenterParent };
+        var owner = new ExcelOwner(Native.GetAncestor(handle, 2));
+        if (dialog.ShowDialog(owner) != DialogResult.OK || dialog.Options is null) return null;
         if (!Native.IsWindow(handle) || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2))) throw new InvalidOperationException("対象Excelを確認できません。もう一度ドロップしてください。");
         dynamic currentSheet = com.Own(window.ActiveSheet);
         dynamic currentBook = com.Own(currentSheet.Parent);
