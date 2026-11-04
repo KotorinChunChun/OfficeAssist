@@ -4,7 +4,7 @@ namespace OfficeAssist;
 
 internal static class ExcelTabularInserter
 {
-    internal static ExcelPictureInserter.Result Insert(nint handle, Point point, IReadOnlyList<TabularData> tables)
+    internal static ExcelPictureInserter.Result? Insert(nint handle, Point point, IReadOnlyList<TabularData> tables)
     {
         if (!Native.IsWindow(handle) || Native.ClassName(handle) != "EXCEL7" || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2)))
             throw new InvalidOperationException("対象のExcelが閉じられたか、ダイアログを表示しています。");
@@ -22,12 +22,98 @@ internal static class ExcelTabularInserter
         }
         catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
         { throw new InvalidOperationException("ワークシートのセルへドロップしてください。"); }
-        return InsertIntoWindow(com, window, tables);
+        dynamic originalSheet = com.Own(window.ActiveSheet);
+        dynamic originalBook = com.Own(originalSheet.Parent);
+        dynamic originalSelection = com.Own(window.RangeSelection);
+        string address = (string)originalSelection.Address;
+        string sheetName = (string)originalSheet.Name;
+        using var dialog = new TabularImportForm(tables);
+        if (dialog.ShowDialog() != DialogResult.OK || dialog.Options is null) return null;
+        if (!Native.IsWindow(handle) || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2))) throw new InvalidOperationException("対象Excelを確認できません。もう一度ドロップしてください。");
+        dynamic currentSheet = com.Own(window.ActiveSheet);
+        dynamic currentBook = com.Own(currentSheet.Parent);
+        dynamic currentSelection = com.Own(window.RangeSelection);
+        if ((string)currentSheet.Name != sheetName || (string)currentBook.FullName != (string)originalBook.FullName || (string)currentSelection.Address != address)
+            throw new InvalidOperationException("設定中にブック・シート・選択範囲が変わりました。もう一度ドロップしてください。");
+        dynamic app = com.Own(window.Application);
+        return Import(com, app, window, tables, dialog.Options);
     }
 
-    internal static ExcelPictureInserter.Result InsertIntoWindow(ComScope com, dynamic window, IReadOnlyList<TabularData> tables)
+    internal static ExcelPictureInserter.Result Import(ComScope com, dynamic app, object? sourceWindow, IReadOnlyList<TabularData> tables, TabularImportOptions options)
+    {
+        Validate(tables, options);
+        if (options.Destination == ImportDestination.Selection)
+            return InsertIntoWindow(com, sourceWindow ?? throw new InvalidOperationException("対象ウィンドウが必要です。"), tables, options);
+        object? createdBook = null;
+        var createdSheets = new List<object>();
+        bool events = (bool)app.EnableEvents;
+        dynamic book;
+        try
+        {
+            app.EnableEvents = false;
+            if (options.Destination == ImportDestination.NewBook)
+            {
+                dynamic books = com.Own(app.Workbooks);
+                createdBook = com.Own(books.Add(-4167)); book = createdBook;
+                book.Date1904 = false;
+            }
+            else
+            {
+                dynamic window = sourceWindow ?? throw new InvalidOperationException("対象ウィンドウが必要です。");
+                dynamic sourceSheet = com.Own(window.ActiveSheet); book = com.Own(sourceSheet.Parent);
+                if ((bool)book.ReadOnly || (bool)book.ProtectStructure) throw new InvalidOperationException("読み取り専用または構成保護中のブックにはシートを追加できません。");
+            }
+            dynamic sheets = com.Own(book.Worksheets);
+            for (int t = 0; t < tables.Count; t++)
+            {
+                dynamic sheet;
+                if (createdBook is not null && t == 0) sheet = com.Own(sheets.Item(1));
+                else { dynamic last = com.Own(sheets.Item((int)sheets.Count)); sheet = com.Own(sheets.Add(After: last)); }
+                createdSheets.Add(sheet);
+                string stem = string.Concat(Path.GetFileNameWithoutExtension(tables[t].Name).Where(c => !"[]:*?/\\'".Contains(c))).Trim();
+                if (stem.Length == 0) stem = "取込";
+                stem = stem[..Math.Min(stem.Length, 24)];
+                for (int suffix = 0; suffix < 10000; suffix++)
+                {
+                    string candidate = suffix == 0 ? stem : stem + "_" + suffix;
+                    bool exists = false;
+                    for (int i = 1; i <= (int)sheets.Count; i++) { dynamic other = com.Own(sheets.Item(i)); if ((string)other.Name == candidate) { exists = true; break; } }
+                    if (!exists) { sheet.Name = candidate; break; }
+                }
+                sheet.Activate(); dynamic cell = com.Own(sheet.Range["A1"]); cell.Select();
+                dynamic window = com.Own(app.ActiveWindow);
+                InsertIntoWindow(com, window, new[] { tables[t] }, new TabularImportOptions(ImportDestination.Selection, [options.Types[t]], options.Header));
+            }
+            return new($"{tables.Count}ファイルを{(options.Destination == ImportDestination.NewBook ? "新しいブック" : "新しいシート")}に取り込みました（{book.Name}）。");
+        }
+        catch (Exception ex)
+        {
+            bool alerts = (bool)app.DisplayAlerts, restored = true;
+            try
+            {
+                app.DisplayAlerts = false;
+                if (createdBook is not null) { dynamic failedBook = createdBook; failedBook.Close(false); }
+                else foreach (dynamic sheet in createdSheets.AsEnumerable().Reverse()) sheet.Delete();
+            }
+            catch (Exception) { restored = false; }
+            finally { app.DisplayAlerts = alerts; }
+            throw new InvalidOperationException(restored ? "取り込みに失敗しました。今回作成したブック・シートは取り消しました。" : "取り込みと作成物の取り消しに失敗しました。対象ブックを確認してください。", ex);
+        }
+        finally { app.EnableEvents = events; }
+    }
+
+    static void Validate(IReadOnlyList<TabularData> tables, TabularImportOptions options)
+    {
+        if (tables.Count == 0 || tables.Count != options.Types.Length || !Enum.IsDefined(options.Destination)) throw new InvalidDataException("取り込み設定が不正です。");
+        for (int t = 0; t < tables.Count; t++) tables[t].ExcelValues(options.Types[t], options.Header);
+    }
+
+    internal static ExcelPictureInserter.Result InsertIntoWindow(ComScope com, dynamic window, IReadOnlyList<TabularData> tables, TabularImportOptions? settings = null)
     {
         if (tables.Count == 0) throw new InvalidOperationException("展開するデータがありません。");
+        var options = settings ?? TabularImportOptions.Infer(tables);
+        Validate(tables, options);
+        var values = tables.Select((t, i) => t.ExcelValues(options.Types[i], options.Header)).ToArray();
         dynamic sheet = com.Own(window.ActiveSheet);
         if ((int)sheet.Type != -4167) throw new InvalidOperationException("ワークシートを選択してください。");
         dynamic book = com.Own(sheet.Parent);
@@ -65,6 +151,7 @@ internal static class ExcelTabularInserter
         }
         bool eventsEnabled = (bool)app.EnableEvents;
         var written = new List<object>();
+        var formats = new List<(object Range, object Format)>();
         try
         {
             app.EnableEvents = false;
@@ -73,13 +160,40 @@ internal static class ExcelTabularInserter
                 dynamic target = targets[i];
                 if ((double)functions.CountA(target) != 0) throw new InvalidOperationException("処理中に展開先が変更されました。");
                 written.Add(target);
-                target.Value2 = tables[i].ExcelValues();
+                dynamic targetColumns = com.Own(target.Columns);
+                for (int c = 0; c < tables[i].ColumnCount; c++)
+                {
+                    dynamic column = com.Own(targetColumns.Item(c + 1));
+                    object? previous = column.NumberFormat;
+                    if (previous is string) formats.Add((column, previous));
+                    else
+                    {
+                        dynamic columnCells = com.Own(column.Cells);
+                        for (int r = 1; r <= tables[i].RowCount; r++) { dynamic cell = com.Own(columnCells.Item(r, 1)); formats.Add((cell, (object)cell.NumberFormat)); }
+                    }
+                    var type = options.Types[i][c];
+                    try
+                    {
+                        if (type is ColumnType.General or ColumnType.TextQuote) column.NumberFormatLocal = (string)app.International[26]; // xlGeneralFormatName
+                        else if (type == ColumnType.Date && !Enumerable.Range(0, tables[i].RowCount).Any(r => values[i][r, c] is double n && n % 1 != 0)) column.NumberFormat = "yyyy/mm/dd";
+                        else column.NumberFormat = ColumnConversion.Format(type);
+                    }
+                    catch (COMException ex) { throw new InvalidOperationException($"列{c + 1}の書式（{ColumnConversion.Format(type)}）を設定できません。", ex); }
+                    dynamic cells = com.Own(column.Cells);
+                    for (int r = 0; r < tables[i].RowCount; r++)
+                    {
+                        if (values[i][r, c] is string && type != ColumnType.TextQuote && type != ColumnType.TextFormat)
+                        { dynamic textCell = com.Own(cells.Item(r + 1, 1)); textCell.NumberFormat = "@"; }
+                    }
+                }
+                target.Value2 = values[i];
             }
         }
         catch (Exception ex)
         {
             bool restored = true;
             foreach (dynamic target in written) { try { target.ClearContents(); } catch (Exception) { restored = false; } }
+            foreach (var saved in formats) { try { dynamic range = saved.Range; range.NumberFormat = saved.Format; } catch (Exception) { restored = false; } }
             throw new InvalidOperationException(restored ? "CSV・TSVを展開できませんでした。今回の書込みを取り消しました。"
                 : "CSV・TSVの展開と取り消しに失敗しました。対象シートを確認してください。", ex);
         }

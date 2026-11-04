@@ -6,12 +6,14 @@ internal sealed record TabularData(string Name, string[][] Rows)
 {
     internal int RowCount => Rows.Length;
     internal int ColumnCount => Rows.Max(r => r.Length);
-    internal object?[,] ExcelValues()
+    internal object?[,] ExcelValues(ColumnType[] types, bool header)
     {
+        if (types.Length != ColumnCount || types.Any(t => !Enum.IsDefined(t))) throw new InvalidDataException("列形式の指定が不正です。");
         var values = new object?[RowCount, ColumnCount];
         for (int r = 0; r < RowCount; r++)
             for (int c = 0; c < Rows[r].Length; c++)
-                if (Rows[r][c].Length > 0) values[r, c] = "'" + Rows[r][c];
+                try { values[r, c] = ColumnConversion.Convert(Rows[r][c], types[c], header && r == 0); }
+                catch (InvalidDataException ex) { throw new InvalidDataException($"{Name}: 行{r + 1}・列{c + 1} — {ex.Message}", ex); }
         return values;
     }
 }
