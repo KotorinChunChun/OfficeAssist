@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "id": "office-assist",
   "name": "OfficeAssist",
-  "version": "0.2.0",
-  "summary": "Office操作を補助し、Excelへ画像をドラッグ＆ドロップで挿入する",
+  "version": "0.2.1",
+  "summary": "Excelへ画像を挿入し、CSV・TSVを列形式を指定して取り込む常駐アプリ",
   "category": "Office・操作補助",
   "executable": "artifacts/management/bin/OfficeAssist/debug/OfficeAssist.exe",
   "installedExecutable": "OfficeAssist.exe",
@@ -28,8 +28,8 @@
       "name": "デスクトップ版Microsoft Excel",
       "kind": "external",
       "optional": true,
-      "feature": "Excelへの画像ドロップ",
-      "guide": "画像挿入にはインストール済みのデスクトップ版Excelを通常権限で起動してください。Web版は対象外です。"
+      "feature": "Excelへの画像・CSV・TSVドロップ",
+      "guide": "画像挿入とCSV・TSV取り込みには、インストール済みのデスクトップ版Excelを通常権限で起動してください。Web版は対象外です。"
     }
   ]
 }
