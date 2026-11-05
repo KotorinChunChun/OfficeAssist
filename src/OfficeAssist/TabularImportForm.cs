@@ -112,7 +112,7 @@ internal sealed class TabularImportForm : BrandedForm
         previewMode.SelectedIndexChanged += (_, _) => Populate();
         destination.SelectedIndexChanged += (_, _) => UpdateModes();
         applyToAll.CheckedChanged += (_, _) => { if (!updating && valid) { selection.SetApplyToAll(applyToAll.Checked, SelectedFile); if (applyToAll.Checked) for (int c = 0; c < tables[SelectedFile].ColumnCount; c++) { Remember(SelectedFile, c, true); Remember(SelectedFile, c, false); } PopulateSettings(); } };
-        chooseFiles.Enabled = reselect is not null; chooseFiles.Click += async (_, _) => { try { var selected = this.reselect?.Invoke(); if (selected is null) return; sources = selected; edits.Clear(); await Rebuild(); } catch (Exception ex) { showMessage(this, ex.Message, MessageBoxIcon.Warning); } };
+        chooseFiles.Enabled = reselect is not null; chooseFiles.Click += async (_, _) => { try { var selected = this.reselect?.Invoke(); if (selected is null) return; sources = selected; edits.Clear(); await Rebuild(); } catch (Exception ex) { this.showMessage(this, ex.Message, MessageBoxIcon.Warning); } };
         import.Click += (_, _) => TryImport(); cancel.Click += (_, _) => { if (working) writeCancellation?.Cancel(); else if (tasks > 0) { pendingClose = true; rebuildCancellation?.Cancel(); } else { DialogResult = DialogResult.Cancel; Close(); } };
         var buttons = Bar(); buttons.FlowDirection = FlowDirection.RightToLeft; buttons.Controls.AddRange([cancel, import]);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(12), ColumnCount = 1, RowCount = 8 };

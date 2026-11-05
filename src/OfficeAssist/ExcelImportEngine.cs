@@ -37,7 +37,7 @@ internal static class ExcelImportEngine
             cells += (long)tables[t].RowCount * tables[t].ColumnCount;
             for (int c = 0; c < tables[t].ColumnCount; c++) options.Decimals(t, c);
             for (int r = 0; r < tables[t].RowCount; r += ChunkRows(tables[t]))
-            { options.Cancellation.ThrowIfCancellationRequested(); tables[t].ExcelValues(options.Types[t], options.Header, r, Math.Min(ChunkRows(tables[t]), tables[t].RowCount - r)); }
+            { options.Progress?.Invoke($"{tables[t].Name}: {r}/{tables[t].RowCount}行を検証中"); options.Cancellation.ThrowIfCancellationRequested(); tables[t].ExcelValues(options.Types[t], options.Header, r, Math.Min(ChunkRows(tables[t]), tables[t].RowCount - r)); }
         }
         if (cells > TabularFiles.MaximumCells) throw new InvalidDataException("出力は合計200万セルまでです。");
     }

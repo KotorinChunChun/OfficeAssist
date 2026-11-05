@@ -142,4 +142,3 @@ internal static class ExcelTabularInserter
         return new($"{tables.Count}ファイルを展開しました（{lastSheet.Name}）。", warning);
     }
 }
-

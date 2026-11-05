@@ -27,7 +27,7 @@ internal static partial class Program
         var many = new TabularData("cancel.csv", Enumerable.Range(0, 25000).Select(i => new[] { "001" }).ToArray());
         int chunks = 0;
         string originalFormat = (string)sheet.Range["Z200"].NumberFormat;
-        var cancelOptions = TabularImportOptions.Infer([many], header: false) with { CellAddress = "Z200", Cancellation = cancellation.Token, Progress = _ => { if (++chunks == 2) cancellation.Cancel(); } };
+        var cancelOptions = TabularImportOptions.Infer([many], header: false) with { CellAddress = "Z200", Cancellation = cancellation.Token, Progress = text => { if (text.Contains("書込み中") && ++chunks == 2) cancellation.Cancel(); } };
         Reject(() => ExcelTabularInserter.Import(com, app, window, new[] { many }, cancelOptions), "分割書込み途中のキャンセルを受け付ける");
         Check(sheet.Range["Z200"].Value2 is null && (string)sheet.Range["Z200"].NumberFormat == originalFormat, "キャンセルで今回の値と書式を復元する");
         added.Range["A10"].Formula = "=\"\"";

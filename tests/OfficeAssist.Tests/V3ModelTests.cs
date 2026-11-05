@@ -29,6 +29,7 @@ internal static partial class Program
         {
             Check(disk[0].Rows[1][1] == "前半\r\n後半" && disk[0].RowCount == 3, "ストリーム解析で引用符内改行と末尾改行を保持する");
             Check(disk[0].Origin!(1).Contains("物理2～3行"), "引用符内改行を含む元の物理行番号を保持する");
+            Check(disk[0].SourceSha256 == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(), "保持した入力のSHA-256を元のバイト列と照合する");
             using var loaded = new ManualResetEventSlim(); using var cache = new TabularPreviewCache(disk[0], loaded.Set);
             cache.Get(1); Check(loaded.Wait(TimeSpan.FromSeconds(3)) && cache.Get(1)![0] == "001", "非同期プレビューキャッシュが保持データを正しく返す");
             var filtered = TabularTransform.Prepare(disk, new(SkipLast: 1), true).Tables[0];

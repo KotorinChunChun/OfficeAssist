@@ -12,11 +12,13 @@ internal sealed class ReceivedTabularBatch : IDisposable
         var batch = new ReceivedTabularBatch(inputs.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
         try
         {
+            long totalBytes = 0;
             foreach (string path in batch.Inputs)
             {
                 if (Directory.Exists(path)) { using var entries = Directory.EnumerateFileSystemEntries(path).GetEnumerator(); entries.MoveNext(); continue; }
                 batch.streams[path] = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 if (batch.streams[path].Length is <= 0 or > 128 * 1024 * 1024) throw new InvalidDataException("CSV・TSVは空でない128MiB以下のファイルを指定してください。");
+                if ((totalBytes += batch.streams[path].Length) > 512 * 1024 * 1024) throw new InvalidDataException("入力の合計容量は512MiBまでです。");
             }
             return batch;
         }

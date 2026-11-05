@@ -8,6 +8,7 @@ internal sealed record TabularData(string Name, TabularRows Rows)
     internal int RowCount => Rows.Length;
     internal int ColumnCount => Rows.Width;
     internal Func<int, string>? Origin { get; init; }
+    internal string? SourceSha256 { get; init; }
     internal object?[,] ExcelValues(ColumnType[] types, bool header, int start = 0, int? count = null)
     {
         if (types.Length != ColumnCount || types.Any(t => !Enum.IsDefined(t))) throw new InvalidDataException("列形式の指定が不正です。");
@@ -53,12 +54,14 @@ internal static class TabularFiles
 
     internal static TabularData ReadStream(FileStream stream, string file, CancellationToken token)
     {
+        stream.Position = 0; token.ThrowIfCancellationRequested();
+        string digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
         stream.Position = 0; Encoding encoding = DetectEncoding(stream, token); stream.Position = 0;
         using var reader = new StreamReader(stream, encoding, true, 65536, true);
         var positions = new List<(int Start, int End)>();
         var rows = TabularRows.Store(ParseRecords(reader, Path.GetExtension(file).Equals(".tsv", StringComparison.OrdinalIgnoreCase) ? '\t' : ',', token,
             (_, first, last) => positions.Add((first, last))), token);
-        return new(Path.GetFileName(file), rows) { Origin = r => $"{Path.GetFullPath(file)}: 行{r + 1}（物理{positions[r].Start}～{positions[r].End}行）" };
+        return new(Path.GetFileName(file), rows) { SourceSha256 = digest, Origin = r => $"{Path.GetFullPath(file)}: 行{r + 1}（物理{positions[r].Start}～{positions[r].End}行）" };
     }
 
     static Encoding DetectEncoding(Stream stream, CancellationToken token)
@@ -130,7 +133,7 @@ internal static class TabularFiles
                 if ((long)++rowCount * maxColumns > MaximumCells) throw new InvalidDataException("１回の展開は200万セルまでです。");
                 position?.Invoke(rowCount, recordStart, lineBefore);
                 yield return fields.ToArray(); fields.Clear(); pending = false; recordStart = physical;
-                if (ch == '\r' && reader.Peek() == '\n') reader.Read();
+                if (ch == '\r' && reader.Peek() == '\n') { reader.Read(); previous = '\n'; }
             }
             else if (closed) throw new InvalidDataException("閉じ引用符の後に不正な文字があります。");
             else if (ch == '"')
