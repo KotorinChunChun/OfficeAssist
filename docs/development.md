@@ -21,8 +21,8 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj
 大型プレビュー用サンプルは次のコマンドで作成します。40列と64列、それぞれ見出し＋1500行で、２ファイル合計156104セルです。番号・日付・数値・日本語・改行・引用符・数式風文字列・空欄を含み、既存ファイルは上書きしません。
 
 ```powershell
-./dev/scripts/New-TabularPreviewSamples.ps1 -OutputDirectory ./dev/history/v0.3.0/logs/large-table-20261105/files
-dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --large-preview dev/history/v0.3.0/logs/large-table-20261105
+./dev/scripts/New-TabularPreviewSamples.ps1 -OutputDirectory ./dev/history/v0.2.2/logs/large-table-20261105/files
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --large-preview dev/history/v0.2.2/logs/large-table-20261105
 ```
 
 CSV取り込みCLIは常駐アプリの排他制御とは独立して新規Excelプロセスを作り、新しいブックへ展開します。全値を読み戻して照合し、`--show`指定時はブックを閉じずに表示します。保存先と報告先が既に存在する場合は上書きしません。
@@ -35,7 +35,7 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj -c Release -- --import
 
 追加の列形式は`date-weekday,datetime,time,grouped-number,percent,yen,duration`です。`--decimals 0,2,0`のように全列分の桁数（0～15）を指定できます。省略時は値から小数桁を推定します。報告には小数桁を含み、`--report-values`指定時は実際の表示文字列も含みます。
 
-v0.3.0では`--skip-first N --skip-last N --drop-empty-rows`で各ファイルを加工し、`--merge --merge-by order|name`で結合します。列名結合は`--header yes`が必要です。`--preview none|first10|all`はGUIとの設定比較用で、非表示CLIはプレビューを生成しません。出力の全件読戻しは常に行います。レポートは既定で件数・列形式等のメタデータだけとし、値・書式・PrefixCharacter等のサンプルが必要な場合は`--report-values`を明示します。
+v0.2.2では`--skip-first N --skip-last N --drop-empty-rows`で各ファイルを加工し、`--merge --merge-by order|name`で結合します。列名結合は`--header yes`が必要です。`--preview none|first10|all`はGUIとの設定比較用で、非表示CLIはプレビューを生成しません。出力の全件読戻しは常に行います。レポートは既定で件数・列形式等のメタデータだけとし、値・書式・PrefixCharacter等のサンプルが必要な場合は`--report-values`を明示します。
 
 `--list-inputs -- C:\path\folder`でフォルダ内の候補と探索エラーをJSON出力します。`--input-list C:\path\selected.json`にはフルパス文字列のJSON配列を取込順で指定できます。`--include-pattern '*2026*.csv'`は対象選択条件として作用します。GUIの検索は表示だけを絞るので用途を区別してください。CLIのフォルダ探索で未解決のエラーがあれば書込みを中止します。
 
@@ -44,7 +44,7 @@ v0.3.0では`--skip-first N --skip-last N --drop-empty-rows`で各ファイル�
 `--selection-com`は専用の非表示Excelで、既存データとの衝突、新規ブック・新規シート、列形式と引用符の有無を検証します。
 
 ```powershell
-dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --selection-com dev/history/v0.3.0/logs/column-check
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --selection-com dev/history/v0.2.2/logs/column-check
 ```
 
 ```powershell
@@ -58,7 +58,7 @@ dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -- --exc
 
 ```powershell
 dotnet build tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release --artifacts-path artifacts/external-drop-pr -warnaserror
-dotnet artifacts/external-drop-pr/bin/OfficeAssist.Tests/release/OfficeAssist.Tests.dll dev/history/v0.3.0/logs/unit
+dotnet artifacts/external-drop-pr/bin/OfficeAssist.Tests/release/OfficeAssist.Tests.dll dev/history/v0.2.2/logs/unit
 ```
 
 管理用ビルド後、OfficeAssistが停止している状態で次を実行すると、無表示起動・状態・誤PID拒否・不正要求後の受付・二重起動・正常停止を確認します。起動中のものがあれば試験起動を中止します。

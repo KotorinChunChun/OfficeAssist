@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "office-assist",
   "name": "OfficeAssist",
-  "version": "0.3.0",
+  "version": "0.2.2",
   "summary": "Excelへ画像を挿入し、CSV・TSVの結合・追記・フォルダ取り込みを行う常駐アプリ",
   "category": "Office・操作補助",
   "executable": "artifacts/management/bin/OfficeAssist/debug/OfficeAssist.exe",
