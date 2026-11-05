@@ -2,7 +2,10 @@ using System.IO.Enumeration;
 
 namespace OfficeAssist;
 
-internal sealed record InputCandidate(string Path, long Length, DateTime Modified);
+internal sealed record InputCandidate(string Path, long Length, DateTime Modified)
+{
+    internal TableEncoding Encoding { get; init; } = TableEncoding.Auto;
+}
 internal sealed record DiscoveryResult(IReadOnlyList<InputCandidate> Files, IReadOnlyList<string> Errors, int Duplicates);
 
 internal static class TabularInputDiscovery
@@ -67,4 +70,6 @@ internal sealed class InputSelection
     internal void SetAll(IEnumerable<int> indexes, bool value) { foreach (int i in indexes) Check(Files[i].Path, value); }
     internal void Move(int index, int delta) { int next = index + delta; if (next < 0 || next >= Files.Count) return; (Files[index], Files[next]) = (Files[next], Files[index]); }
     internal void Sort() => Files.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Path, b.Path));
+    internal void SetEncoding(IEnumerable<int> indexes, TableEncoding encoding)
+    { if (!Enum.IsDefined(encoding)) throw new InvalidDataException("文字コードが不正です。"); foreach (int index in indexes) Files[index] = Files[index] with { Encoding = encoding }; }
 }

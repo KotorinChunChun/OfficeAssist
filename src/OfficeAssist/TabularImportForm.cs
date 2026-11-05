@@ -39,6 +39,7 @@ internal sealed class TabularImportForm : BrandedForm
     readonly NumericUpDown skipLast = new() { Name = "SkipLastRows", Width = 80, Maximum = int.MaxValue };
     readonly ImportComboBox mergeBy = new() { Name = "MergeBy", Width = 100 };
     readonly ImportComboBox previewMode = new() { Name = "PreviewMode", Width = 210 };
+    readonly ImportComboBox encoding = new() { Name = "ImportEncoding", Width = 190 };
     readonly Label mergeByLabel = LabelFor("結合基準");
     readonly Panel settingsViewport = new() { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
     readonly Panel settings = new() { Height = 108 };
@@ -56,6 +57,8 @@ internal sealed class TabularImportForm : BrandedForm
     readonly ExcelTargetEditor? targets;
     readonly Func<IReadOnlyList<TabularData>?>? reselect;
     readonly bool usePreviewCache;
+    readonly Func<string?, int>? readEncoding;
+    readonly Func<string?, TableEncoding, IReadOnlyList<TabularData>?>? reencode;
     TabularPreviewCache? previewCache;
     readonly Button import = new() { Text = "取り込む", AutoSize = true };
     readonly Button cancel = new() { Text = "キャンセル", AutoSize = true };
@@ -79,20 +82,23 @@ internal sealed class TabularImportForm : BrandedForm
     internal ExcelPictureInserter.Result? Result { get; private set; }
     internal TabularImportForm(IReadOnlyList<TabularData> tables, Func<TabularImportOptions, ExcelPictureInserter.Result>? execute = null,
         Action<IWin32Window, string, MessageBoxIcon>? showMessage = null, ExcelTargetEditor? targets = null,
-        Func<IReadOnlyList<TabularData>?>? reselect = null, bool defer = false)
+        Func<IReadOnlyList<TabularData>?>? reselect = null, bool defer = false,
+        Func<string?, int>? readEncoding = null, Func<string?, TableEncoding, IReadOnlyList<TabularData>?>? reencode = null)
     {
         if (tables.Count == 0) throw new ArgumentException("ファイルがありません。", nameof(tables));
         sources = tables; usePreviewCache = defer; this.tables = defer ? new[] { new TabularData("読込中", [[""]]) } : tables;
         selection = new(this.tables); this.targets = targets; this.reselect = reselect;
         this.execute = execute; this.showMessage = showMessage ?? ((owner, message, icon) => MessageBox.Show(owner, message, Text, MessageBoxButtons.OK, icon));
+        this.readEncoding = readEncoding; this.reencode = reencode;
         Text = WindowTitle.Create("CSV・TSVの取り込み"); StartPosition = FormStartPosition.CenterParent;
         ClientSize = new(1180, 760); MinimumSize = new(860, 600); MinimizeBox = false; MaximizeBox = true; ShowInTaskbar = false; TopMost = true; Font = new("Yu Gothic UI", 10);
         destination.Items.AddRange(["新しいブック", "新しいシート", "指定セル", "同名のシートに追記"]); destination.SelectedIndex = (int)ImportDestination.Selection;
         mergeBy.Items.AddRange(["列順", "列名"]); mergeBy.SelectedIndex = 0;
         previewMode.Items.AddRange(["しない", "各ファイル先頭10行", "すべて"]); previewMode.SelectedIndex = 1;
+        encoding.Items.AddRange(TabularEncoding.Labels.Concat(new[] { "ファイル別（混在）" }).ToArray()); encoding.SelectedIndex = 0; encoding.Enabled = reencode is not null;
         header.Checked = selection.Header;
         var top = Bar(); top.Controls.AddRange([LabelFor("展開先"), destination]); if (targets is not null) top.Controls.Add(targets);
-        var rows = Bar(); rows.Controls.AddRange([LabelFor("先頭から除外"), skipFirst, LabelFor("行　末尾から除外"), skipLast, LabelFor("行"), dropEmpty]);
+        var rows = Bar(); rows.Controls.AddRange([LabelFor("先頭から除外"), skipFirst, LabelFor("行　末尾から除外"), skipLast, LabelFor("行"), dropEmpty, LabelFor("文字コード"), encoding]);
         var modeBar = Bar(); modeBar.Controls.AddRange([merge, header, mergeByLabel, mergeBy, LabelFor("プレビュー"), previewMode, chooseFiles]);
         fileBar.Controls.AddRange([LabelFor("ファイル名を選択"), files, applyToAll]);
         tips.SetToolTip(applyToAll, "他のファイルの同じ列番号へ列形式と小数桁を適用します。行除外は全ファイル共通です。");
@@ -110,8 +116,20 @@ internal sealed class TabularImportForm : BrandedForm
         skipFirst.ValueChanged += async (_, _) => await Rebuild(autoHeader: !headerEdited); skipLast.ValueChanged += async (_, _) => await Rebuild(autoHeader: !headerEdited); dropEmpty.CheckedChanged += async (_, _) => await Rebuild(autoHeader: !headerEdited);
         merge.CheckedChanged += async (_, _) => { UpdateModes(); await Rebuild(); }; mergeBy.SelectedIndexChanged += async (_, _) => { if (!updating) await Rebuild(); };
         previewMode.SelectedIndexChanged += (_, _) => Populate();
+        encoding.SelectedIndexChanged += async (_, _) =>
+        {
+            if (updating || working || tasks > 0 || encoding.SelectedIndex is < 0 or > 4 || this.reencode is null) return;
+            try
+            {
+                string? file = merge.Checked || applyToAll.Checked ? null : this.tables[SelectedFile].SourcePath;
+                var decoded = this.reencode(file, (TableEncoding)encoding.SelectedIndex);
+                if (decoded is not null) { sources = decoded; edits.Clear(); await Rebuild(autoHeader: !headerEdited); }
+            }
+            catch (Exception ex) { this.showMessage(this, ex.Message, MessageBoxIcon.Warning); }
+            finally { SyncEncoding(); }
+        };
         destination.SelectedIndexChanged += (_, _) => UpdateModes();
-        applyToAll.CheckedChanged += (_, _) => { if (!updating && valid) { selection.SetApplyToAll(applyToAll.Checked, SelectedFile); if (applyToAll.Checked) for (int c = 0; c < tables[SelectedFile].ColumnCount; c++) { Remember(SelectedFile, c, true); Remember(SelectedFile, c, false); } PopulateSettings(); } };
+        applyToAll.CheckedChanged += (_, _) => { if (!updating && valid) { selection.SetApplyToAll(applyToAll.Checked, SelectedFile); if (applyToAll.Checked) for (int c = 0; c < tables[SelectedFile].ColumnCount; c++) { Remember(SelectedFile, c, true); Remember(SelectedFile, c, false); } PopulateSettings(); SyncEncoding(); } };
         chooseFiles.Enabled = reselect is not null; chooseFiles.Click += async (_, _) => { try { var selected = this.reselect?.Invoke(); if (selected is null) return; sources = selected; edits.Clear(); await Rebuild(); } catch (Exception ex) { this.showMessage(this, ex.Message, MessageBoxIcon.Warning); } };
         import.Click += (_, _) => TryImport(); cancel.Click += (_, _) => { if (working) writeCancellation?.Cancel(); else if (tasks > 0) { pendingClose = true; rebuildCancellation?.Cancel(); } else { DialogResult = DialogResult.Cancel; Close(); } };
         var buttons = Bar(); buttons.FlowDirection = FlowDirection.RightToLeft; buttons.Controls.AddRange([cancel, import]);
@@ -140,7 +158,7 @@ internal sealed class TabularImportForm : BrandedForm
     {
         if (updating || working) return;
         int revision = ++generation; rebuildCancellation?.Cancel(); var cancellation = new CancellationTokenSource(); rebuildCancellation = cancellation; tasks++;
-        valid = false; import.Enabled = chooseFiles.Enabled = false; status.Text = "行加工・列形式を解析中";
+        valid = false; import.Enabled = chooseFiles.Enabled = encoding.Enabled = false; status.Text = "行加工・列形式を解析中";
         var rules = new TableTransformOptions((int)skipFirst.Value, (int)skipLast.Value, dropEmpty.Checked, merge.Checked, merge.Checked && mergeBy.SelectedIndex == 1);
         bool hasHeader = header.Checked; var input = sources;
         try
@@ -162,7 +180,7 @@ internal sealed class TabularImportForm : BrandedForm
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (revision == generation) { status.Text = ex.Message; previewRows = []; preview.RowCount = 0; } }
-        finally { tasks--; cancellation.Dispose(); if (revision == generation) { rebuildCancellation = null; import.Enabled = valid; chooseFiles.Enabled = reselect is not null; } if (pendingClose && tasks == 0) { DialogResult = DialogResult.Cancel; Close(); } }
+        finally { tasks--; cancellation.Dispose(); if (revision == generation) { rebuildCancellation = null; import.Enabled = valid; chooseFiles.Enabled = reselect is not null; encoding.Enabled = reencode is not null; } if (pendingClose && tasks == 0) { DialogResult = DialogResult.Cancel; Close(); } }
     }
     void UpdateModes()
     {
@@ -179,7 +197,7 @@ internal sealed class TabularImportForm : BrandedForm
         if (merge.Checked && destination.SelectedIndex == (int)ImportDestination.AppendSameSheet) { showMessage(this, "追記と結合は同時に指定できません。", MessageBoxIcon.Warning); return false; }
         working = true; writeCancellation = new(); import.Enabled = false; cancel.Text = "中止";
         var editors = Controls.Cast<Control>().ToArray();
-        destination.Enabled = files.Enabled = header.Enabled = merge.Enabled = dropEmpty.Enabled = skipFirst.Enabled = skipLast.Enabled = previewMode.Enabled = mergeBy.Enabled = applyToAll.Enabled = chooseFiles.Enabled = settingsViewport.Enabled = false;
+        destination.Enabled = files.Enabled = header.Enabled = merge.Enabled = dropEmpty.Enabled = skipFirst.Enabled = skipLast.Enabled = previewMode.Enabled = mergeBy.Enabled = applyToAll.Enabled = chooseFiles.Enabled = settingsViewport.Enabled = encoding.Enabled = false;
         if (targets is not null) targets.Enabled = false;
         try
         {
@@ -194,7 +212,7 @@ internal sealed class TabularImportForm : BrandedForm
         finally
         {
             working = false; writeCancellation.Dispose(); writeCancellation = null;
-            if (!IsDisposed) { import.Enabled = valid; cancel.Text = "キャンセル"; destination.Enabled = files.Enabled = header.Enabled = dropEmpty.Enabled = skipFirst.Enabled = skipLast.Enabled = previewMode.Enabled = mergeBy.Enabled = applyToAll.Enabled = settingsViewport.Enabled = true; chooseFiles.Enabled = reselect is not null; if (targets is not null) targets.Enabled = true; UpdateModes(); }
+            if (!IsDisposed) { import.Enabled = valid; cancel.Text = "キャンセル"; destination.Enabled = files.Enabled = header.Enabled = dropEmpty.Enabled = skipFirst.Enabled = skipLast.Enabled = previewMode.Enabled = mergeBy.Enabled = applyToAll.Enabled = settingsViewport.Enabled = true; chooseFiles.Enabled = reselect is not null; encoding.Enabled = reencode is not null; if (targets is not null) targets.Enabled = true; UpdateModes(); }
         }
     }
     void Populate()
@@ -205,8 +223,15 @@ internal sealed class TabularImportForm : BrandedForm
         previewCache?.Dispose(); previewCache = usePreviewCache ? new(table, () => { if (!IsDisposed && IsHandleCreated) try { BeginInvoke(() => { if (!IsDisposed) preview.Invalidate(); }); } catch (InvalidOperationException) { } }) : null;
         for (int c = 0; c < table.ColumnCount; c++) { string title = selection.Header && c < table.Rows[0].Length ? table.Rows[0][c] : "列" + (c + 1); preview.Columns.Add(new DataGridViewTextBoxColumn { Name = "Data" + c, HeaderText = title, Width = ColumnWidth, SortMode = DataGridViewColumnSortMode.NotSortable }); }
         previewRows = TabularTransform.PreviewRows(table, selection.Header, (PreviewMode)Math.Max(0, previewMode.SelectedIndex)); preview.RowCount = previewRows.Length; preview.Visible = previewMode.SelectedIndex != 0;
-        PopulateSettings();
-        if (valid) { status.Text = $"{tables.Count}表 / {tables.Sum(t => t.RowCount - (selection.Header ? 1 : 0))}データ行 / 表示 {previewRows.Length}行" + (notices.Length == 0 ? "" : " / " + string.Join("　", notices.Take(3))); tips.SetToolTip(status, string.Join(Environment.NewLine, notices)); }
+        PopulateSettings(); SyncEncoding();
+        if (valid) { status.Text = $"{tables.Count}表 / {tables.Sum(t => t.RowCount - (selection.Header ? 1 : 0))}データ行 / 表示 {previewRows.Length}行" + (table.DetectedEncoding is null ? "" : " / " + table.DetectedEncoding) + (notices.Length == 0 ? "" : " / " + string.Join("　", notices.Take(3))); tips.SetToolTip(status, string.Join(Environment.NewLine, notices)); }
+    }
+    void SyncEncoding()
+    {
+        if (readEncoding is null || tables.Count == 0) return;
+        bool prior = updating; updating = true;
+        encoding.SelectedIndex = readEncoding(merge.Checked || applyToAll.Checked ? null : tables[SelectedFile].SourcePath);
+        updating = prior;
     }
     void PopulateSettings()
     {

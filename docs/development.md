@@ -41,6 +41,15 @@ v0.2.2では`--skip-first N --skip-last N --drop-empty-rows`で各ファイル�
 
 `--list-excel-targets`で実行中ExcelのPID・bookId・シート名を取得できます。既存ブックへのCLI書込みは`--excel-instance PID --book-id ID`を必須とし、`--new-sheet`、`--append-same-sheet`、または`--sheet 名前 --cell B3`で対象を指定します。追記と結合は排他です。試験には専用Excelプロセスと合成データを使用してください。
 
+文字コードは`--encoding auto|utf8|utf16le|utf16be|cp932`で指定します。既定はautoです。ファイル別指定は`--encoding-map C:\path\encodings.json`を使い、JSONオブジェクトのキーを入力のフルパス、値を文字コード名とします。mapで指定されていないファイルには`--encoding`を適用します。レポートのencodingsに指定値と実際のデコーダー名を記録します。
+
+行除外・結合・追記・文字コードの検証用ファイル20ケースは、次のコマンドで生成できます。UTF-8（BOM有無）、UTF-16 LE/BE（BOM有無）、CP932、引用符内改行、空欄と空白、列順違い、重複見出し、同名別パス、不正UTF-8等を含み、manifest.jsonで用途とSHA-256を確認できます。rejectフォルダは拒否の確認用です。
+
+```powershell
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --create-import-cases dev/history/v0.2.2/logs/new-cases
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --selection-com dev/history/v0.2.2/logs/encoding-check
+```
+
 `--selection-com`は専用の非表示Excelで、既存データとの衝突、新規ブック・新規シート、列形式と引用符の有無を検証します。
 
 ```powershell

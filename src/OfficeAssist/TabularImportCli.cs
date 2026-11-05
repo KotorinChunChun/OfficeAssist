@@ -24,7 +24,8 @@ internal static class TabularImportCli
             }
             int separator = Array.IndexOf(args, "--");
             if (separator < 0) separator = args.Length;
-            string? report = null, saveAs = null, typeList = null, decimalsList = null, bookId = null, sheetName = null, cellAddress = null, inputList = null, includePattern = null;
+            string? report = null, saveAs = null, typeList = null, decimalsList = null, bookId = null, sheetName = null, cellAddress = null, inputList = null, includePattern = null, encodingMap = null;
+            TableEncoding encoding = TableEncoding.Auto;
             bool show = false, reportValues = false, listInputs = false; bool? header = null; int instance = 0;
             var destination = ImportDestination.NewBook; var transform = new TableTransformOptions();
             var explicitDestinations = new HashSet<ImportDestination>();
@@ -46,6 +47,8 @@ internal static class TabularImportCli
                     case "--list-inputs": listInputs = true; break;
                     case "--input-list": inputList = Value(); break;
                     case "--include-pattern": includePattern = Value(); break;
+                    case "--encoding": encoding = TabularEncoding.Parse(Value()); break;
+                    case "--encoding-map": encodingMap = Value(); break;
                     case "--report": report = Path.GetFullPath(Value()); break;
                     case "--save-as": saveAs = Path.GetFullPath(Value()); break;
                     case "--types": typeList = Value(); break;
@@ -75,7 +78,9 @@ internal static class TabularImportCli
             if (destination == ImportDestination.NewBook && !show && saveAs is null) throw new ArgumentException("--show または --save-as を指定してください。");
             if (saveAs is not null && (File.Exists(saveAs) || !saveAs.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("保存先は未使用のxlsxパスを指定してください。");
             if (report is not null && File.Exists(report)) throw new ArgumentException("報告先が既に存在します。");
-            sources = TabularFiles.Read(inputFiles);
+            var encodings = encodingMap is null ? null : (JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(encodingMap)) ?? throw new ArgumentException("encoding-mapはパスと文字コードのJSONオブジェクトです。"))
+                .ToDictionary(pair => Path.GetFullPath(pair.Key), pair => TabularEncoding.Parse(pair.Value), StringComparer.OrdinalIgnoreCase);
+            sources = TabularFiles.Read(inputFiles, encoding: encoding, encodings: encodings);
             bool hasHeader = header ?? TabularImportOptions.Infer(TabularTransform.Prepare(sources, transform with { Merge = false, MergeByName = false }, false).Tables).Header;
             var prepared = TabularTransform.Prepare(sources, transform, hasHeader); var tables = prepared.Tables;
             var options = TabularImportOptions.Infer(tables, destination, hasHeader) with { BookId = bookId, SheetName = sheetName, CellAddress = cellAddress, Merged = transform.Merge };
@@ -121,7 +126,8 @@ internal static class TabularImportCli
             dynamic book = com.Own(((dynamic)writes[0].Sheet).Parent);
             if (saveAs is not null) { Directory.CreateDirectory(Path.GetDirectoryName(saveAs)!); book.SaveAs(saveAs, 51); }
             Native.GetWindowThreadProcessId((nint)(int)app.Hwnd, out uint pid);
-            var output = new { verified = true, pid, workbook = (string)book.FullName, header = options.Header, message = result.Message, notices = prepared.Notices, sheets = reports };
+            var output = new { verified = true, pid, workbook = (string)book.FullName, header = options.Header, message = result.Message, notices = prepared.Notices,
+                encodings = sources.Select(s => new { file = s.Name, requested = encodings is not null && encodings.TryGetValue(s.SourcePath!, out var requested) ? requested : encoding, detected = s.DetectedEncoding }).ToArray(), sheets = reports };
             if (report is not null) { Directory.CreateDirectory(Path.GetDirectoryName(report)!); File.WriteAllText(report, JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true })); }
             if (show) { app.Visible = true; if (owned) app.DisplayAlerts = true; keep = true; }
             return 0;

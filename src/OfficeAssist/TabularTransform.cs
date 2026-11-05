@@ -26,7 +26,7 @@ internal static class TabularTransform
             if (indexes.Count == 0) { notices.Add($"{source.Name}: 全行を除外しました。"); continue; }
             int width = indexes.Max(i => source.Rows[i].Length);
             var view = new TabularData(source.Name, new TabularRows(indexes.Count, width, i => source.Rows[indexes[i]]))
-            { Origin = i => source.Origin?.Invoke(indexes[i]) ?? $"{source.Name}: 行{indexes[i] + 1}" };
+            { SourcePath = source.SourcePath, DetectedEncoding = source.DetectedEncoding, SourceSha256 = source.SourceSha256, Origin = i => source.Origin?.Invoke(indexes[i]) ?? $"{source.Name}: 行{indexes[i] + 1}" };
             tables.Add(view);
             if (indexes.Count != source.RowCount) notices.Add($"{source.Name}: {source.RowCount - indexes.Count}行を除外しました。");
         }

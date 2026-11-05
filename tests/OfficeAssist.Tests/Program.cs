@@ -28,12 +28,14 @@ internal static partial class Program
         Directory.CreateDirectory(output);
         try
         {
+            if (args.Contains("--create-import-cases")) { var cases = ImportFixtureSet.Create(output); Console.WriteLine($"生成: {cases.Length}ケース → {output}"); return 0; }
             DropTests();
             TabularTests(output);
             ImportSelectionTests();
             TabularFormatTests();
             V3ModelTests(output);
             V3InputTests(output);
+            V22EncodingTests(output);
             if (args.Contains("--large-preview")) LargeImportPreviewTests(output);
             var image = Path.Combine(output, "01-blue.png");
             using (var bitmap = new Bitmap(240, 120))
@@ -61,7 +63,7 @@ internal static partial class Program
             var invalid = Path.Combine(output, "invalid.png");
             File.WriteAllText(invalid, "これは画像ではありません。");
             ReceivedImageTests(output, image, image2, invalid);
-            if (args.Contains("--selection-com")) ExcelSelectionTests();
+            if (args.Contains("--selection-com")) ExcelSelectionTests(output);
             Reject(() => ImageFiles.Validate([image, invalid]), "拡張子偽装を拒否");
             Reject(() => ImageFiles.Validate([Path.Combine(output, "missing.jpg")]), "存在しない画像を拒否");
             Check(ImageFiles.Fit(960, 480) == new SizeF(480, 240), "横長画像の縦横比と上限");

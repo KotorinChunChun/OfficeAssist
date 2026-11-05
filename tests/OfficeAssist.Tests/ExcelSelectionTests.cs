@@ -3,7 +3,7 @@ using System.Diagnostics;
 
 internal static partial class Program
 {
-    static void ExcelSelectionTests()
+    static void ExcelSelectionTests(string output)
     {
         var existing = Process.GetProcessesByName("EXCEL").Select(p => { using (p) return p.Id; }).ToHashSet();
         using var com = new ComScope();
@@ -39,6 +39,7 @@ internal static partial class Program
                 TabularFormatExcelTests(com, window, sheet);
                 TabularModalExcelTests(com, window, sheet);
                 V3ExcelTests(com, window, sheet);
+                V22FixtureExcelTests(com, window, sheet, output);
             }
             finally { try { book.Close(false); } catch (System.Runtime.InteropServices.COMException) { } }
         }

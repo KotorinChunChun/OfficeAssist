@@ -9,6 +9,8 @@ internal sealed record TabularData(string Name, TabularRows Rows)
     internal int ColumnCount => Rows.Width;
     internal Func<int, string>? Origin { get; init; }
     internal string? SourceSha256 { get; init; }
+    internal string? SourcePath { get; init; }
+    internal string? DetectedEncoding { get; init; }
     internal object?[,] ExcelValues(ColumnType[] types, bool header, int start = 0, int? count = null)
     {
         if (types.Length != ColumnCount || types.Any(t => !Enum.IsDefined(t))) throw new InvalidDataException("列形式の指定が不正です。");
@@ -31,7 +33,7 @@ internal static class TabularFiles
     internal static bool Accepts(IReadOnlyList<string>? files) => files is { Count: > 0 and <= 50 }
         && files.All(f => !string.IsNullOrWhiteSpace(f) && Path.GetExtension(f).ToLowerInvariant() is ".csv" or ".tsv");
 
-    internal static IReadOnlyList<TabularData> Read(IReadOnlyList<string> files, CancellationToken token = default)
+    internal static IReadOnlyList<TabularData> Read(IReadOnlyList<string> files, CancellationToken token = default, TableEncoding encoding = TableEncoding.Auto, IReadOnlyDictionary<string, TableEncoding>? encodings = null)
     {
         if (!Accepts(files)) throw new InvalidDataException("CSV・TSVファイルだけを指定してください。");
         var tables = new List<TabularData>();
@@ -43,7 +45,7 @@ internal static class TabularFiles
             if (stream.Length is <= 0 or > 128 * 1024 * 1024) throw new InvalidDataException("CSV・TSVは１ファイル128MiBまでの空でないファイルを指定してください。");
             totalBytes += stream.Length;
             if (totalBytes > 512 * 1024 * 1024) throw new InvalidDataException("１回のファイル容量は合計512MiBまでです。");
-            var table = ReadStream(stream, file, token);
+            var table = ReadStream(stream, file, token, encodings is not null && encodings.TryGetValue(Path.GetFullPath(file), out var selected) ? selected : encoding);
             totalCells += (long)table.RowCount * table.ColumnCount;
             tables.Add(table);
             if (totalCells > MaximumCells) throw new InvalidDataException("１回の展開は合計200万セルまでです。");
@@ -52,16 +54,18 @@ internal static class TabularFiles
         return tables;
     }
 
-    internal static TabularData ReadStream(FileStream stream, string file, CancellationToken token)
+    internal static TabularData ReadStream(FileStream stream, string file, CancellationToken token, TableEncoding choice = TableEncoding.Auto)
     {
         stream.Position = 0; token.ThrowIfCancellationRequested();
         string digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
-        stream.Position = 0; Encoding encoding = DetectEncoding(stream, token); stream.Position = 0;
-        using var reader = new StreamReader(stream, encoding, true, 65536, true);
+        stream.Position = 0; Encoding encoding = choice == TableEncoding.Auto ? DetectEncoding(stream, token) : TabularEncoding.Explicit(stream, choice); stream.Position = 0;
+        using var reader = new StreamReader(stream, encoding, false, 65536, true);
         var positions = new List<(int Start, int End)>();
-        var rows = TabularRows.Store(ParseRecords(reader, Path.GetExtension(file).Equals(".tsv", StringComparison.OrdinalIgnoreCase) ? '\t' : ',', token,
-            (_, first, last) => positions.Add((first, last))), token);
-        return new(Path.GetFileName(file), rows) { SourceSha256 = digest, Origin = r => $"{Path.GetFullPath(file)}: 行{r + 1}（物理{positions[r].Start}～{positions[r].End}行）" };
+        TabularRows rows;
+        try { rows = TabularRows.Store(ParseRecords(reader, Path.GetExtension(file).Equals(".tsv", StringComparison.OrdinalIgnoreCase) ? '\t' : ',', token,
+            (_, first, last) => positions.Add((first, last))), token); }
+        catch (DecoderFallbackException ex) { throw new InvalidDataException($"{Path.GetFileName(file)}: 選択した文字コードで読み込めません。文字コードを変更してください。", ex); }
+        return new(Path.GetFileName(file), rows) { SourcePath = Path.GetFullPath(file), DetectedEncoding = encoding.WebName, SourceSha256 = digest, Origin = r => $"{Path.GetFullPath(file)}: 行{r + 1}（物理{positions[r].Start}～{positions[r].End}行）" };
     }
 
     static Encoding DetectEncoding(Stream stream, CancellationToken token)

@@ -39,7 +39,7 @@ internal sealed class ReceivedTabularBatch : IDisposable
                     if (stream.Length != file.Length || File.GetLastWriteTimeUtc(file.Path) != file.Modified) throw new IOException($"{file.Path}: 検索後にファイルが変わりました。対象を確認し直してください。");
                 }
                 if (stream.Length is <= 0 or > 128 * 1024 * 1024 || (totalBytes += stream.Length) > 512 * 1024 * 1024) throw new InvalidDataException("入力容量の上限（1ファイル128MiB・合計512MiB）を超えます。");
-                var table = TabularFiles.ReadStream(stream, file.Path, token); tables.Add(table);
+                var table = TabularFiles.ReadStream(stream, file.Path, token, file.Encoding); tables.Add(table);
                 if ((totalCells += (long)table.RowCount * table.ColumnCount) > TabularFiles.MaximumCells) throw new InvalidDataException("入力は合計200万セルまでです。");
             }
             return tables;

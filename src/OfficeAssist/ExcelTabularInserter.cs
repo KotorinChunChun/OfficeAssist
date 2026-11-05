@@ -36,7 +36,17 @@ internal static class ExcelTabularInserter
                 if (load.ShowDialog(parent) != DialogResult.OK) { if (load.Error is not null) throw load.Error; return null; }
                 return load.Result;
             }
-            sources = Load(inputSelection!.Selected, owner); if (sources is null) return null;
+            while (sources is null)
+            {
+                try { sources = Load(inputSelection!.Selected, owner); if (sources is null) return null; }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(owner, ex.Message + Environment.NewLine + "対象ファイルと文字コードを確認してください。", WindowTitle.Create("CSV・TSVの読込み"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    using var chooser = new FileSelectionForm(received.Inputs, inputSelection) { StartPosition = FormStartPosition.CenterParent };
+                    if (chooser.ShowDialog(owner) != DialogResult.OK) return null;
+                    inputSelection = chooser.Selection;
+                }
+            }
             var targets = new ExcelTargetEditor(com, window);
             targets.TargetWindowChanged = hwnd => { if (!locks.ContainsKey(hwnd)) locks[hwnd] = new(hwnd); };
             targets.LockCurrentWindows();
@@ -51,7 +61,18 @@ internal static class ExcelTabularInserter
                 if (chooser.ShowDialog(dialog) != DialogResult.OK) return null;
                 var replacement = Load(chooser.Selected, dialog!); if (replacement is null) return null;
                 foreach (var table in sources) table.Rows.Dispose(); sources = replacement; inputSelection = chooser.Selection; return replacement;
-            }, defer: true))
+            }, defer: true, readEncoding: path =>
+            {
+                var choices = inputSelection!.Selected.Where(f => path is null || f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).Select(f => f.Encoding).Distinct().ToArray();
+                return choices.Length == 1 ? (int)choices[0] : 5;
+            }, reencode: (path, encoding) =>
+            {
+                var changed = inputSelection!.Files.Select(f => inputSelection.IsChecked(f.Path) && (path is null || f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)) ? f with { Encoding = encoding } : f).ToArray();
+                var replacement = Load(changed.Where(f => inputSelection.IsChecked(f.Path)).ToArray(), dialog!);
+                if (replacement is null) return null;
+                var next = new InputSelection(changed); foreach (var file in changed) next.Check(file.Path, inputSelection.IsChecked(file.Path));
+                foreach (var table in sources) table.Rows.Dispose(); sources = replacement; inputSelection = next; return replacement;
+            }))
                 return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Result : null;
         }
         finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); foreach (var modalLock in locks.Values.Reverse()) modalLock.Dispose(); }
