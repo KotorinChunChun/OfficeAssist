@@ -14,6 +14,7 @@ internal sealed record TabularImportOptions(ImportDestination Destination, Colum
     internal bool Merged { get; init; }
     internal CancellationToken Cancellation { get; init; }
     internal Action<string>? Progress { get; init; }
+    internal Action<IReadOnlyList<ExcelImportEngine.Write>>? Completed { get; init; }
     internal int Decimals(int file, int column)
     {
         if (DecimalPlaces is null) return 0;

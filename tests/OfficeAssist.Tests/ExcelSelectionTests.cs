@@ -37,6 +37,7 @@ internal static partial class Program
                 TabularExcelTests(com, window, sheet);
                 TabularFormatExcelTests(com, window, sheet);
                 TabularModalExcelTests(com, window, sheet);
+                V3ExcelTests(com, window, sheet);
             }
             finally { book.Close(false); }
         }

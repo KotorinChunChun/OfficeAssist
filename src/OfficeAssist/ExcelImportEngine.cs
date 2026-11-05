@@ -1,0 +1,197 @@
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
+
+namespace OfficeAssist;
+
+internal static class ExcelImportEngine
+{
+    internal sealed record Write(TabularData Table, ColumnType[] Types, int[] Decimals, object Sheet, int Row, int Column, bool Header);
+    internal static object ResolveBook(ComScope com, dynamic app, object? window, string? id)
+    {
+        if (id is null) { dynamic source = window ?? throw new InvalidOperationException("対象ブックを指定してください。"); dynamic sheet = com.Own(source.ActiveSheet); return com.Own(sheet.Parent); }
+        dynamic books = com.Own(app.Workbooks);
+        for (int i = 1; i <= (int)books.Count; i++) { dynamic book = com.Own(books.Item(i)); if ((string)book.FullName == id) return book; }
+        throw new InvalidOperationException("指定ブックが閉じられたか変更されました。");
+    }
+    internal static object ResolveSheet(ComScope com, dynamic book, string name)
+    {
+        dynamic sheets = com.Own(book.Worksheets);
+        for (int i = 1; i <= (int)sheets.Count; i++) { dynamic sheet = com.Own(sheets.Item(i)); if (string.Equals((string)sheet.Name, name, StringComparison.OrdinalIgnoreCase)) return sheet; }
+        throw new InvalidOperationException("指定シートが見つかりません。");
+    }
+    internal static string NormalizeAddress(string address)
+    {
+        string normalized = address.Replace("$", "").ToUpperInvariant();
+        if (!Regex.IsMatch(normalized, @"^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?(,[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?)*$", RegexOptions.CultureInvariant))
+            throw new InvalidDataException("セルはB3またはB3:D7のようなA1形式で指定してください。");
+        return normalized;
+    }
+    internal static void Validate(IReadOnlyList<TabularData> tables, TabularImportOptions options)
+    {
+        if (tables.Count == 0 || tables.Count != options.Types.Length || !Enum.IsDefined(options.Destination) || options.Merged && options.Destination == ImportDestination.AppendSameSheet)
+            throw new InvalidDataException("取り込み設定が不正です。追記と結合は同時に指定できません。");
+        long cells = 0;
+        for (int t = 0; t < tables.Count; t++)
+        {
+            if (tables[t].RowCount == 0) throw new InvalidDataException("取り込む行がありません。");
+            cells += (long)tables[t].RowCount * tables[t].ColumnCount;
+            for (int c = 0; c < tables[t].ColumnCount; c++) options.Decimals(t, c);
+            for (int r = 0; r < tables[t].RowCount; r += ChunkRows(tables[t]))
+            { options.Cancellation.ThrowIfCancellationRequested(); tables[t].ExcelValues(options.Types[t], options.Header, r, Math.Min(ChunkRows(tables[t]), tables[t].RowCount - r)); }
+        }
+        if (cells > TabularFiles.MaximumCells) throw new InvalidDataException("出力は合計200万セルまでです。");
+    }
+    static int ChunkRows(TabularData table) => Math.Max(1, 20000 / Math.Max(1, table.ColumnCount));
+    internal static List<Write> Selection(ComScope com, dynamic window, IReadOnlyList<TabularData> tables, TabularImportOptions options)
+    {
+        dynamic app = com.Own(window.Application);
+        dynamic sheet;
+        dynamic selected;
+        if (options.BookId is not null || options.SheetName is not null || options.CellAddress is not null)
+        {
+            dynamic book = ResolveBook(com, app, window, options.BookId);
+            sheet = options.SheetName is null ? com.Own(book.ActiveSheet) : ResolveSheet(com, book, options.SheetName);
+            selected = com.Own(sheet.Range[NormalizeAddress(options.CellAddress ?? "A1")]);
+        }
+        else { sheet = com.Own(window.ActiveSheet); selected = com.Own(window.RangeSelection); }
+        dynamic areas = com.Own(selected.Areas); var writes = new List<Write>(); int next = 0;
+        if (options.Merged && (int)areas.Count != 1) throw new InvalidDataException("結合時は指定セルを1つの連続範囲にしてください。");
+        for (int t = 0; t < tables.Count; t++)
+        {
+            dynamic area = com.Own(areas.Item(Math.Min(t + 1, (int)areas.Count)));
+            int row = t < (int)areas.Count ? (int)area.Row : next;
+            writes.Add(new(tables[t], options.Types[t], Enumerable.Range(0, tables[t].ColumnCount).Select(c => options.Decimals(t, c)).ToArray(), sheet, row, (int)area.Column, options.Header));
+            next = row + tables[t].RowCount + 1;
+        }
+        return writes;
+    }
+    internal static List<Write> Append(ComScope com, dynamic app, dynamic book, IReadOnlyList<TabularData> tables, TabularImportOptions options, List<object> created)
+    {
+        dynamic sheets = com.Own(book.Worksheets); var writes = new List<Write>();
+        var nextRows = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var headers = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        for (int t = 0; t < tables.Count; t++)
+        {
+            var source = tables[t]; string name = Path.GetFileNameWithoutExtension(source.Name);
+            if (name.Length is 0 or > 31 || name.IndexOfAny("[]:*?/\\".ToCharArray()) >= 0 || name.StartsWith('\'') || name.EndsWith('\'')) throw new InvalidDataException($"{source.Name}: 同名シートとして使用できない名前です。");
+            dynamic sheet;
+            try { sheet = ResolveSheet(com, book, name); }
+            catch (InvalidOperationException)
+            {
+                if ((bool)book.ProtectStructure) throw new InvalidOperationException("ブックの構成が保護されているためシートを作れません。");
+                sheet = com.Own(sheets.Add(After: com.Own(sheets.Item((int)sheets.Count)))); created.Add(sheet); sheet.Name = name;
+            }
+            if (!nextRows.TryGetValue(name, out int next))
+            {
+                dynamic cells = com.Own(sheet.Cells);
+                object? lastObject = cells.Find("*", After: com.Own(cells.Item(1, 1)), LookIn: -4123, LookAt: 2, SearchOrder: 1, SearchDirection: 2, MatchCase: false, MatchByte: false, SearchFormat: false);
+                if (lastObject is null) next = 1;
+                else { dynamic last = com.Own(lastObject); next = (int)last.Row + 1; }
+                if (next > 1)
+                {
+                    object? rightObject = cells.Find("*", After: com.Own(cells.Item(1, 1)), LookIn: -4123, LookAt: 2, SearchOrder: 2, SearchDirection: 2, MatchCase: false, MatchByte: false, SearchFormat: false);
+                    dynamic right = com.Own(rightObject!); int width = (int)right.Column;
+                    if (options.Header)
+                    { dynamic range = com.Own(sheet.Range["A1"].Resize[1, width]); object raw = range.Value2; headers[name] = Enumerable.Range(0, width).Select(c => raw is Array a ? Convert.ToString(a.GetValue(1, c + 1)) ?? "" : Convert.ToString(raw) ?? "").ToArray(); }
+                    else headers[name] = new string[width];
+                }
+            }
+            var data = source; var types = options.Types[t]; var decimals = Enumerable.Range(0, source.ColumnCount).Select(c => options.Decimals(t, c)).ToArray(); bool outputHeader = options.Header;
+            if (next > 1)
+            {
+                int[] map;
+                if (options.Header)
+                {
+                    var existing = TabularTransform.HeaderKeys(headers[name]); var input = TabularTransform.HeaderKeys(source.Rows[0]);
+                    if (input.Length != source.ColumnCount || input.Any(key => !existing.Contains(key))) throw new InvalidDataException($"{source.Name}: 既存シートにない列があります。");
+                    map = existing.Select(key => Array.IndexOf(input, key)).ToArray();
+                }
+                else { if (headers[name].Length != source.ColumnCount) throw new InvalidDataException($"{source.Name}: 既存シートと列数が異なります。"); map = Enumerable.Range(0, source.ColumnCount).ToArray(); }
+                int skip = options.Header ? 1 : 0;
+                data = new(source.Name, new TabularRows(source.RowCount - skip, map.Length, r => { var row = source.Rows[r + skip]; return map.Select(c => c >= 0 && c < row.Length ? row[c] : "").ToArray(); })) { Origin = r => source.Origin?.Invoke(r + skip) ?? $"{source.Name}: 行{r + skip + 1}" };
+                types = map.Select(c => c >= 0 ? options.Types[t][c] : ColumnType.TextFormat).ToArray();
+                int fileIndex = t; decimals = map.Select(c => c >= 0 ? options.Decimals(fileIndex, c) : 0).ToArray(); outputHeader = false;
+            }
+            else headers[name] = options.Header ? source.Rows[0] : new string[source.ColumnCount];
+            writes.Add(new(data, types, decimals, sheet, next, 1, outputHeader)); nextRows[name] = next + data.RowCount;
+        }
+        return writes;
+    }
+    internal static void Execute(ComScope com, dynamic app, IReadOnlyList<Write> writes, TabularImportOptions options)
+    {
+        if (writes.Sum(w => (long)w.Table.RowCount * w.Table.ColumnCount) > TabularFiles.MaximumCells) throw new InvalidDataException("列対応後の出力が200万セルを超えます。");
+        var targets = new List<object>(); var saved = new List<(object Range, object Format)>(); var written = new List<object>();
+        foreach (var write in writes)
+        {
+            dynamic sheet = write.Sheet, book = com.Own(sheet.Parent), rows = com.Own(sheet.Rows), columns = com.Own(sheet.Columns);
+            if ((bool)book.ReadOnly || (bool)sheet.ProtectContents || (bool)sheet.ProtectDrawingObjects) throw new InvalidOperationException("読み取り専用ブックや保護シートには展開できません。");
+            if ((long)write.Row + write.Table.RowCount - 1 > (int)rows.Count || (long)write.Column + write.Table.ColumnCount - 1 > (int)columns.Count) throw new InvalidOperationException("展開先がExcelの行数・列数を超えます。");
+            dynamic cells = com.Own(sheet.Cells), first = com.Own(cells.Item(write.Row, write.Column)), range = com.Own(first.Resize[write.Table.RowCount, write.Table.ColumnCount]);
+            dynamic functions = com.Own(app.WorksheetFunction);
+            if (range.MergeCells is not bool merged || merged || (double)functions.CountA(range) != 0 || range.HasArray is not bool array || array)
+                throw new InvalidOperationException($"展開先 {ExcelAddress.Display(range)} に値・数式・結合セルがあります。空のセルを指定してください。");
+            try { if (range.HasSpill is not bool spill || spill) throw new InvalidOperationException("展開先はスピル範囲と重なっています。"); }
+            catch (COMException ex) when ((uint)ex.HResult == 0x80020003) { throw new InvalidOperationException("スピル範囲を検査できないExcelです。新しいシートを使用してください。", ex); }
+            dynamic tables = com.Own(sheet.ListObjects), pivots = com.Own(sheet.PivotTables());
+            for (int i = 1; i <= (int)tables.Count; i++) { dynamic table = com.Own(tables.Item(i)); if (app.Intersect(range, com.Own(table.Range)) is object overlap) { com.Own(overlap); throw new InvalidOperationException("展開先はExcelテーブルと重なっています。"); } }
+            for (int i = 1; i <= (int)pivots.Count; i++) { dynamic pivot = com.Own(pivots.Item(i)); if (app.Intersect(range, com.Own(pivot.TableRange2)) is object overlap) { com.Own(overlap); throw new InvalidOperationException("展開先はピボットテーブルと重なっています。"); } }
+            for (int i = 0; i < targets.Count; i++)
+            { dynamic previousSheet = writes[i].Sheet; if ((string)previousSheet.Name == (string)sheet.Name && app.Intersect(targets[i], range) is object overlap) { com.Own(overlap); throw new InvalidOperationException("複数ファイルの展開先が重なっています。"); } }
+            targets.Add(range);
+        }
+        bool events = (bool)app.EnableEvents, updating = (bool)app.ScreenUpdating;
+        try
+        {
+            app.EnableEvents = false; app.ScreenUpdating = false;
+            for (int i = 0; i < writes.Count; i++)
+            {
+                var write = writes[i]; dynamic target = targets[i], targetColumns = com.Own(target.Columns);
+                options.Cancellation.ThrowIfCancellationRequested(); written.Add(target);
+                for (int c = 0; c < write.Table.ColumnCount; c++)
+                {
+                    dynamic column = com.Own(targetColumns.Item(c + 1)); SaveFormat(com, column, saved);
+                    string format = ColumnConversion.Format(write.Types[c], write.Decimals[c]);
+                    if (write.Types[c] is ColumnType.General or ColumnType.TextQuote) column.NumberFormatLocal = (string)app.International[26]; else column.NumberFormat = format;
+                }
+                int step = ChunkRows(write.Table);
+                for (int r = 0; r < write.Table.RowCount; r += step)
+                {
+                    options.Progress?.Invoke($"{write.Table.Name}: {r}/{write.Table.RowCount}行を書込み中"); options.Cancellation.ThrowIfCancellationRequested();
+                    int count = Math.Min(step, write.Table.RowCount - r);
+                    var values = write.Table.ExcelValues(write.Types, write.Header, r, count);
+                    dynamic dateBook = com.Own(((dynamic)write.Sheet).Parent);
+                    AdjustDateSystem(values, write.Types, (bool)dateBook.Date1904);
+                    dynamic cells = com.Own(target.Cells), first = com.Own(cells.Item(r + 1, 1)), chunk = com.Own(first.Resize[count, write.Table.ColumnCount]);
+                    for (int row = 0; row < count; row++) for (int c = 0; c < write.Table.ColumnCount; c++)
+                        if (values[row, c] is string && write.Types[c] is not (ColumnType.TextFormat or ColumnType.TextQuote)) { dynamic textCell = com.Own(cells.Item(r + row + 1, c + 1)); textCell.NumberFormat = "@"; }
+                    chunk.Value2 = values;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            bool restored = true;
+            foreach (dynamic target in written) try { target.ClearContents(); } catch { restored = false; }
+            foreach (var format in saved) try { dynamic range = format.Range; range.NumberFormat = format.Format; } catch { restored = false; }
+            throw new InvalidOperationException(restored ? "取り込みを中止しました。今回の書込みを取り消しました。" : "書込みの取り消しに失敗しました。対象シートを確認してください。", ex);
+        }
+        finally { app.EnableEvents = events; app.ScreenUpdating = updating; }
+        options.Completed?.Invoke(writes);
+    }
+    static void SaveFormat(ComScope com, dynamic range, List<(object Range, object Format)> saved)
+    {
+        object? format = range.NumberFormat;
+        if (format is string) { saved.Add((range, format)); return; }
+        dynamic rows = com.Own(range.Rows), cells = com.Own(range.Cells); int count = (int)rows.Count;
+        if (count == 1) { saved.Add((range, "General")); return; }
+        int half = count / 2;
+        SaveFormat(com, com.Own(cells.Item(1, 1).Resize[half, 1]), saved);
+        SaveFormat(com, com.Own(cells.Item(half + 1, 1).Resize[count - half, 1]), saved);
+    }
+    internal static void AdjustDateSystem(object?[,] values, ColumnType[] types, bool date1904)
+    {
+        if (!date1904) return;
+        for (int r = 0; r < values.GetLength(0); r++) for (int c = 0; c < types.Length; c++)
+            if (values[r, c] is double value && (ColumnConversion.IsDate(types[c]) || types[c] == ColumnType.Time && value >= 1)) values[r, c] = value - 1462;
+    }
+}
