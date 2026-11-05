@@ -148,7 +148,7 @@ internal static class ExcelTabularInserter
             nextRow = row + table.RowCount + 1;
             object? merged = target.MergeCells;
             if (merged is not bool hasMerged || hasMerged || (double)functions.CountA(target) != 0)
-                throw new InvalidOperationException($"展開先 {target.Address} に値・数式・結合セルがあります。空のセルを選択してください。");
+                throw new InvalidOperationException($"展開先 {ExcelAddress.Display(target)} に値・数式・結合セルがあります。空のセルを選択してください。");
             foreach (dynamic previous in targets)
             {
                 object? overlap = app.Intersect(previous, target);

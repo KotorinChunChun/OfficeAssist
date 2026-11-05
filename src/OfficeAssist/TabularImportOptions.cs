@@ -3,11 +3,17 @@ using System.Text.RegularExpressions;
 
 namespace OfficeAssist;
 
-internal enum ImportDestination { NewBook, NewSheet, Selection }
+internal enum ImportDestination { NewBook, NewSheet, Selection, AppendSameSheet }
 internal enum ColumnType { TextFormat, TextQuote, Date, General, Number, DateWeekday, DateTime, Time, GroupedNumber, Percent, Yen, Duration }
 internal sealed record TabularImportOptions(ImportDestination Destination, ColumnType[][] Types, bool Header)
 {
     internal int[][]? DecimalPlaces { get; init; }
+    internal string? BookId { get; init; }
+    internal string? SheetName { get; init; }
+    internal string? CellAddress { get; init; }
+    internal bool Merged { get; init; }
+    internal CancellationToken Cancellation { get; init; }
+    internal Action<string>? Progress { get; init; }
     internal int Decimals(int file, int column)
     {
         if (DecimalPlaces is null) return 0;
@@ -18,10 +24,8 @@ internal sealed record TabularImportOptions(ImportDestination Destination, Colum
     internal static TabularImportOptions Infer(IReadOnlyList<TabularData> tables, ImportDestination destination = ImportDestination.Selection, bool? header = null)
     {
         bool hasHeader = header ?? tables.Any(ColumnConversion.LooksLikeHeader);
-        var types = tables.Select(t => Enumerable.Range(0, t.ColumnCount)
-            .Select(c => ColumnConversion.Infer(t.Rows.Skip(hasHeader ? 1 : 0).Select(r => c < r.Length ? r[c] : ""))).ToArray()).ToArray();
-        return new(destination, types, hasHeader) { DecimalPlaces = tables.Select((t, f) => Enumerable.Range(0, t.ColumnCount)
-            .Select(c => ColumnConversion.InferDecimals(t.Rows.Skip(hasHeader ? 1 : 0).Select(r => c < r.Length ? r[c] : ""), types[f][c])).ToArray()).ToArray() };
+        var inferred = tables.Select(t => ColumnInference.Scan(t, hasHeader)).ToArray();
+        return new(destination, inferred.Select(i => i.Types).ToArray(), hasHeader) { DecimalPlaces = inferred.Select(i => i.Decimals).ToArray() };
     }
 }
 
@@ -36,8 +40,8 @@ internal static class ColumnConversion
         NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out number) && double.IsFinite(number);
     internal static bool IsNumeric(ColumnType type) => type is ColumnType.Number or ColumnType.GroupedNumber or ColumnType.Percent or ColumnType.Yen;
     internal static bool IsDate(ColumnType type) => type is ColumnType.Date or ColumnType.DateWeekday or ColumnType.DateTime;
-    static bool TryYen(string value, out double number) => TryNumber(value.Replace("¥", "").Replace("￥", "").Replace("\\", ""), out number);
-    static bool TryPercent(string value, out double number)
+    internal static bool TryYen(string value, out double number) => TryNumber(value.Replace("¥", "").Replace("￥", "").Replace("\\", ""), out number);
+    internal static bool TryPercent(string value, out double number)
     {
         bool percent = value.EndsWith('%') || value.EndsWith('％');
         if (!TryNumber(percent ? value[..^1] : value, out number)) return false;
@@ -70,7 +74,7 @@ internal static class ColumnConversion
         }
         return Math.Min(places, 15);
     }
-    static bool PreserveAsText(string value)
+    internal static bool PreserveAsText(string value)
     {
         string s = value.TrimStart('+', '-');
         return value != value.Trim() || (s.Length > 1 && s[0] == '0' && char.IsDigit(s[1])) || s.Count(char.IsDigit) > 15;
@@ -89,10 +93,11 @@ internal static class ColumnConversion
     internal static bool LooksLikeHeader(TabularData table)
     {
         if (table.RowCount < 2) return false;
+        var types = ColumnInference.Scan(table, true).Types;
         return Enumerable.Range(0, table.ColumnCount).Any(c =>
         {
             string first = c < table.Rows[0].Length ? table.Rows[0][c] : "";
-            var type = Infer(table.Rows.Skip(1).Select(r => c < r.Length ? r[c] : ""));
+            var type = types[c];
             if (first.Length == 0 || type is ColumnType.General or ColumnType.TextFormat or ColumnType.TextQuote) return false;
             try { Convert(first, type, false); return false; } catch (InvalidDataException) { return true; }
         });

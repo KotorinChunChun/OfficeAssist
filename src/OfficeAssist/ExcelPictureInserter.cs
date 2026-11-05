@@ -63,7 +63,7 @@ internal static class ExcelPictureInserter
             options = InsertSettings.Load();
             if (showOptions)
             {
-                using var dialog = new InsertOptionsForm(selectedAddress, files.Count, allowLinkedImages, options);
+                using var dialog = new InsertOptionsForm(ExcelAddress.Display(selected), files.Count, allowLinkedImages, options);
                 if (dialog.ShowDialog() != DialogResult.OK || dialog.Options is null) return null;
                 options = dialog.Options;
                 InsertSettings.Save(options);
@@ -83,7 +83,7 @@ internal static class ExcelPictureInserter
         var destinations = new List<object>();
         if (options.Destination == Destination.DropPosition) destinations.Add(anchor);
         else for (int i = 1; i <= (int)areas.Count; i++) destinations.Add(com.Own(areas.Item(i)));
-        string address = options.Destination == Destination.DropPosition ? (string)anchor.Address : selectedAddress;
+        string address = options.Destination == Destination.DropPosition ? ExcelAddress.Display(anchor) : ExcelAddress.Display(selected);
         var assignments = ImageAssignment.Create(destinations.Count, files.Count);
         var warnings = new List<string>();
         if (options.Destination != Destination.DropPosition && files.Count > destinations.Count)
