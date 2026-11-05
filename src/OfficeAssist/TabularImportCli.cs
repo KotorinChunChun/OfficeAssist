@@ -23,25 +23,29 @@ internal static class TabularImportCli
                 Console.WriteLine(JsonSerializer.Serialize(targets, new JsonSerializerOptions { WriteIndented = true })); return 0;
             }
             int separator = Array.IndexOf(args, "--");
-            if (separator < 0 || separator == args.Length - 1) throw new ArgumentException("-- の後にCSV・TSVを指定してください。");
-            string? report = null, saveAs = null, typeList = null, decimalsList = null, bookId = null, sheetName = null, cellAddress = null;
-            bool show = false, reportValues = false; bool? header = null; int instance = 0;
+            if (separator < 0) separator = args.Length;
+            string? report = null, saveAs = null, typeList = null, decimalsList = null, bookId = null, sheetName = null, cellAddress = null, inputList = null, includePattern = null;
+            bool show = false, reportValues = false, listInputs = false; bool? header = null; int instance = 0;
             var destination = ImportDestination.NewBook; var transform = new TableTransformOptions();
+            var explicitDestinations = new HashSet<ImportDestination>();
             for (int i = 0; i < separator; i++)
             {
                 string Value() => ++i < separator ? args[i] : throw new ArgumentException("オプションの値がありません。");
                 switch (args[i])
                 {
                     case "--import-table": break;
-                    case "--new-book": destination = ImportDestination.NewBook; break;
-                    case "--new-sheet": destination = ImportDestination.NewSheet; break;
-                    case "--append-same-sheet": destination = ImportDestination.AppendSameSheet; break;
-                    case "--cell": cellAddress = Value(); destination = ImportDestination.Selection; break;
+                    case "--new-book": destination = ImportDestination.NewBook; explicitDestinations.Add(destination); break;
+                    case "--new-sheet": destination = ImportDestination.NewSheet; explicitDestinations.Add(destination); break;
+                    case "--append-same-sheet": destination = ImportDestination.AppendSameSheet; explicitDestinations.Add(destination); break;
+                    case "--cell": cellAddress = Value(); destination = ImportDestination.Selection; explicitDestinations.Add(destination); break;
                     case "--excel-instance": instance = int.Parse(Value()); break;
                     case "--book-id": bookId = Value(); break;
                     case "--sheet": sheetName = Value(); break;
                     case "--show": show = true; break;
                     case "--report-values": reportValues = true; break;
+                    case "--list-inputs": listInputs = true; break;
+                    case "--input-list": inputList = Value(); break;
+                    case "--include-pattern": includePattern = Value(); break;
                     case "--report": report = Path.GetFullPath(Value()); break;
                     case "--save-as": saveAs = Path.GetFullPath(Value()); break;
                     case "--types": typeList = Value(); break;
@@ -56,11 +60,22 @@ internal static class TabularImportCli
                     default: throw new ArgumentException("未対応のオプションです: " + args[i]);
                 }
             }
+            if (explicitDestinations.Count > 1) throw new ArgumentException("展開先は1種類だけ指定してください。");
             if (destination == ImportDestination.AppendSameSheet && transform.Merge) throw new ArgumentException("追記と結合は同時に指定できません。");
+            string[] inputFiles = inputList is null ? separator < args.Length ? args[(separator + 1)..] : [] : JsonSerializer.Deserialize<string[]>(File.ReadAllText(inputList)) ?? throw new ArgumentException("input-listはフルパスのJSON配列です。");
+            if (inputFiles.Length == 0) throw new ArgumentException("CSV・TSVかフォルダ、または--input-listを指定してください。");
+            if (listInputs || inputFiles.Any(Directory.Exists))
+            {
+                var discovery = TabularInputDiscovery.Find(inputFiles);
+                if (listInputs) { Console.WriteLine(JsonSerializer.Serialize(discovery, new JsonSerializerOptions { WriteIndented = true })); return discovery.Errors.Count == 0 ? 0 : 1; }
+                if (discovery.Errors.Count != 0) throw new IOException("フォルダ検索で問題が発生しました。--list-inputsで詳細を確認してください。");
+                inputFiles = discovery.Files.Select(f => f.Path).ToArray();
+            }
+            inputFiles = inputFiles.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).Where(p => includePattern is null || TabularInputDiscovery.Matches(p, includePattern)).ToArray();
             if (destination == ImportDestination.NewBook && !show && saveAs is null) throw new ArgumentException("--show または --save-as を指定してください。");
             if (saveAs is not null && (File.Exists(saveAs) || !saveAs.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("保存先は未使用のxlsxパスを指定してください。");
             if (report is not null && File.Exists(report)) throw new ArgumentException("報告先が既に存在します。");
-            sources = TabularFiles.Read(args[(separator + 1)..]);
+            sources = TabularFiles.Read(inputFiles);
             bool hasHeader = header ?? TabularImportOptions.Infer(TabularTransform.Prepare(sources, transform with { Merge = false, MergeByName = false }, false).Tables).Header;
             var prepared = TabularTransform.Prepare(sources, transform, hasHeader); var tables = prepared.Tables;
             var options = TabularImportOptions.Infer(tables, destination, hasHeader) with { BookId = bookId, SheetName = sheetName, CellAddress = cellAddress, Merged = transform.Merge };

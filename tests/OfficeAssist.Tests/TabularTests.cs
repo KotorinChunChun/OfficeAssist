@@ -37,7 +37,10 @@ internal static partial class Program
         int failures = 0;
         using var service = new ExcelDropService(dispatcher, (_, failure) => { if (failure) failures++; }, startTimer: false);
         var queue = typeof(ExcelDropService).GetMethod("QueueInsert", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        Check(queue.Invoke(service, [new[] { broken }, Point.Empty, 0]) is false && failures == 1 && !service.Busy, "CSV解析失敗をDrop受信経路から漏らさない");
+        Check(queue.Invoke(service, [new[] { broken }, Point.Empty, 0]) is false && !service.Busy, "受付先が閉じた場合も処理中状態を残さない");
+        using var held = ReceivedTabularBatch.Capture([broken]);
+        var info = new FileInfo(broken);
+        Reject(() => held.Read([new(broken, info.Length, info.LastWriteTimeUtc)], default), "保持したCSVの構文エラーを応答後の解析で拒否する");
     }
 
     static void TabularExcelTests(ComScope com, dynamic window, dynamic sheet)

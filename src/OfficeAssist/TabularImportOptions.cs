@@ -22,10 +22,10 @@ internal sealed record TabularImportOptions(ImportDestination Destination, Colum
             throw new InvalidDataException("小数点以下桁数は0～15桁で指定してください。");
         return DecimalPlaces[file][column];
     }
-    internal static TabularImportOptions Infer(IReadOnlyList<TabularData> tables, ImportDestination destination = ImportDestination.Selection, bool? header = null)
+    internal static TabularImportOptions Infer(IReadOnlyList<TabularData> tables, ImportDestination destination = ImportDestination.Selection, bool? header = null, CancellationToken token = default)
     {
-        bool hasHeader = header ?? tables.Any(ColumnConversion.LooksLikeHeader);
-        var inferred = tables.Select(t => ColumnInference.Scan(t, hasHeader)).ToArray();
+        bool hasHeader = header ?? tables.Any(t => ColumnConversion.LooksLikeHeader(t, token));
+        var inferred = tables.Select(t => ColumnInference.Scan(t, hasHeader, token)).ToArray();
         return new(destination, inferred.Select(i => i.Types).ToArray(), hasHeader) { DecimalPlaces = inferred.Select(i => i.Decimals).ToArray() };
     }
 }
@@ -91,10 +91,10 @@ internal static class ColumnConversion
         if (values.All(v => !PreserveAsText(v) && TryNumber(v, out _))) return values.Any(v => v.Contains(',')) ? ColumnType.GroupedNumber : ColumnType.Number;
         return ColumnType.TextFormat;
     }
-    internal static bool LooksLikeHeader(TabularData table)
+    internal static bool LooksLikeHeader(TabularData table, CancellationToken token = default)
     {
         if (table.RowCount < 2) return false;
-        var types = ColumnInference.Scan(table, true).Types;
+        var types = ColumnInference.Scan(table, true, token).Types;
         return Enumerable.Range(0, table.ColumnCount).Any(c =>
         {
             string first = c < table.Rows[0].Length ? table.Rows[0][c] : "";

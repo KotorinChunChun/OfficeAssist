@@ -48,7 +48,7 @@ internal sealed class TabularRows : IReadOnlyList<string[]>, IDisposable
                     for (int c = 0; c < row.Length; c++) row[c] = reader.ReadString();
                     cached = index; last = row; return row;
                 }
-            }, () => { reader.Dispose(); stream.Dispose(); });
+            }, () => { lock (stream) { reader.Dispose(); stream.Dispose(); } });
         }
         catch { stream.Dispose(); throw; }
     }

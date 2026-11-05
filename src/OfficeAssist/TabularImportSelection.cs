@@ -9,10 +9,10 @@ internal sealed class TabularImportSelection
     internal int[][] DecimalPlaces { get; private set; }
     internal bool Header { get; private set; }
     internal bool ApplyToAll { get; private set; }
-    internal TabularImportSelection(IReadOnlyList<TabularData> tables)
+    internal TabularImportSelection(IReadOnlyList<TabularData> tables, CancellationToken token = default, bool? header = null)
     {
         this.tables = tables;
-        var inferred = TabularImportOptions.Infer(tables);
+        var inferred = TabularImportOptions.Infer(tables, header: header, token: token);
         Header = inferred.Header; Types = inferred.Types;
         DecimalPlaces = inferred.DecimalPlaces!;
         edited = tables.Select(t => new bool[t.ColumnCount]).ToArray();

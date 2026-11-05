@@ -67,11 +67,11 @@ internal sealed class ExcelDropService : IDisposable
         var handle = target;
         bool allowLinks = allowLinkedImages;
         ReceivedImageBatch? batch = null;
-        IReadOnlyList<TabularData>? tables = null;
+        ReceivedTabularBatch? tables = null;
         bool showOptions = false;
         try
         {
-            if (TabularFiles.Accepts(files)) tables = TabularFiles.Read(files);
+            if (TabularInputDiscovery.Accepts(files)) tables = ReceivedTabularBatch.Capture(files);
             else { showOptions = InsertSettings.IsPressed(InsertSettings.LoadModifier(), keyState); batch = ReceivedImageBatch.Capture(files); }
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException
@@ -83,6 +83,7 @@ internal sealed class ExcelDropService : IDisposable
         try { dispatcher.BeginInvoke(new Action(() =>
         {
             using var received = batch;
+            using var receivedTables = tables;
             try
             {
                 var result = tables is not null ? ExcelTabularInserter.Insert(handle, point, tables)
@@ -103,7 +104,7 @@ internal sealed class ExcelDropService : IDisposable
             }
             finally { Busy = false; }
         })); }
-        catch (InvalidOperationException) { batch?.Dispose(); Busy = false; return false; }
+        catch (InvalidOperationException) { batch?.Dispose(); tables?.Dispose(); Busy = false; return false; }
         return true;
     }
 

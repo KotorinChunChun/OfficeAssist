@@ -11,7 +11,7 @@ internal static class ExcelDropData
         {
             if (!data.GetDataPresent(DataFormats.FileDrop, false)
                 || data.GetData(DataFormats.FileDrop, false) is not string[] paths
-                || (!ImageFiles.Accepts(paths) && !TabularFiles.Accepts(paths))) return null;
+                || (!ImageFiles.Accepts(paths) && !TabularInputDiscovery.Accepts(paths))) return null;
             return (string[])paths.Clone();
         }
         catch (Exception ex) when (ex is ExternalException or ArgumentException or InvalidOperationException or NotSupportedException)

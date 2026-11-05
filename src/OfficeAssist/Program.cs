@@ -8,7 +8,7 @@ internal static class Program
     static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        if (args.Contains("--import-table") || args.Contains("--list-excel-targets")) return TabularImportCli.Run(args);
+        if (args.Contains("--import-table") || args.Contains("--list-excel-targets") || args.Contains("--list-inputs")) return TabularImportCli.Run(args);
         using var mutex = new Mutex(true, @"Local\OfficeAssist." + WindowsIdentity.GetCurrent().User!.Value, out bool first);
         if (!first)
         {

@@ -42,16 +42,23 @@ internal static class TabularFiles
             if (stream.Length is <= 0 or > 128 * 1024 * 1024) throw new InvalidDataException("CSV・TSVは１ファイル128MiBまでの空でないファイルを指定してください。");
             totalBytes += stream.Length;
             if (totalBytes > 512 * 1024 * 1024) throw new InvalidDataException("１回のファイル容量は合計512MiBまでです。");
-            Encoding encoding = DetectEncoding(stream, token); stream.Position = 0;
-            using var reader = new StreamReader(stream, encoding, true, 65536, true);
-            var rows = TabularRows.Store(ParseRecords(reader, Path.GetExtension(file).Equals(".tsv", StringComparison.OrdinalIgnoreCase) ? '\t' : ',', token), token);
-            var table = new TabularData(Path.GetFileName(file), rows) { Origin = r => $"{Path.GetFullPath(file)}: 行{r + 1}" };
+            var table = ReadStream(stream, file, token);
             totalCells += (long)table.RowCount * table.ColumnCount;
             tables.Add(table);
             if (totalCells > MaximumCells) throw new InvalidDataException("１回の展開は合計200万セルまでです。");
         } }
         catch { foreach (var table in tables) table.Rows.Dispose(); throw; }
         return tables;
+    }
+
+    internal static TabularData ReadStream(FileStream stream, string file, CancellationToken token)
+    {
+        stream.Position = 0; Encoding encoding = DetectEncoding(stream, token); stream.Position = 0;
+        using var reader = new StreamReader(stream, encoding, true, 65536, true);
+        var positions = new List<(int Start, int End)>();
+        var rows = TabularRows.Store(ParseRecords(reader, Path.GetExtension(file).Equals(".tsv", StringComparison.OrdinalIgnoreCase) ? '\t' : ',', token,
+            (_, first, last) => positions.Add((first, last))), token);
+        return new(Path.GetFileName(file), rows) { Origin = r => $"{Path.GetFullPath(file)}: 行{r + 1}（物理{positions[r].Start}～{positions[r].End}行）" };
     }
 
     static Encoding DetectEncoding(Stream stream, CancellationToken token)
@@ -86,7 +93,7 @@ internal static class TabularFiles
         if (text.Length == 0 || text.Contains('\0')) throw new InvalidDataException("空データまたはバイナリデータは展開できません。");
         return ParseRecords(new StringReader(text), separator).ToArray();
     }
-    internal static IEnumerable<string[]> ParseRecords(TextReader reader, char separator, CancellationToken token = default)
+    internal static IEnumerable<string[]> ParseRecords(TextReader reader, char separator, CancellationToken token = default, Action<int, int, int>? position = null)
     {
         var fields = new List<string>();
         var field = new StringBuilder();
@@ -98,9 +105,13 @@ internal static class TabularFiles
             fields.Add(field.ToString()); field.Clear(); closed = false;
         }
         int rowCount = 0; bool pending = false;
+        int physical = 1, recordStart = 1; char previous = '\0';
         for (int item; (item = reader.Read()) >= 0;)
         {
             char ch = (char)item; pending = true;
+            int lineBefore = physical;
+            if (ch == '\r' || ch == '\n' && previous != '\r') physical++;
+            previous = ch;
             if ((cells & 1023) == 0) token.ThrowIfCancellationRequested();
             if (ch == '\0') throw new InvalidDataException("バイナリデータは展開できません。");
             if (quoted)
@@ -117,7 +128,8 @@ internal static class TabularFiles
             {
                 EndField(); maxColumns = Math.Max(maxColumns, fields.Count);
                 if ((long)++rowCount * maxColumns > MaximumCells) throw new InvalidDataException("１回の展開は200万セルまでです。");
-                yield return fields.ToArray(); fields.Clear(); pending = false;
+                position?.Invoke(rowCount, recordStart, lineBefore);
+                yield return fields.ToArray(); fields.Clear(); pending = false; recordStart = physical;
                 if (ch == '\r' && reader.Peek() == '\n') reader.Read();
             }
             else if (closed) throw new InvalidDataException("閉じ引用符の後に不正な文字があります。");
@@ -130,6 +142,6 @@ internal static class TabularFiles
             if (field.Length > 32767) throw new InvalidDataException("１セルの文字数は32767文字までです。");
         }
         if (quoted) throw new InvalidDataException("引用符が閉じられていません。");
-        if (pending) { EndField(); if ((long)(rowCount + 1) * Math.Max(maxColumns, fields.Count) > MaximumCells) throw new InvalidDataException("１回の展開は200万セルまでです。"); yield return fields.ToArray(); }
+        if (pending) { EndField(); if ((long)(rowCount + 1) * Math.Max(maxColumns, fields.Count) > MaximumCells) throw new InvalidDataException("１回の展開は200万セルまでです。"); position?.Invoke(rowCount + 1, recordStart, physical); yield return fields.ToArray(); }
     }
 }

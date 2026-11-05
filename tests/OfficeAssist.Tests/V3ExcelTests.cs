@@ -33,5 +33,11 @@ internal static partial class Program
         added.Range["A10"].Formula = "=\"\"";
         ExcelTabularInserter.Import(com, app, window, new[] { source }, options);
         Check((string)added.Range["A11"].Value2 == "山田", "空文字を返す数式の下へ追記する");
+        using var target = new ExcelTargetEditor(com, window);
+        ((ComboBox)target.Controls.Find("TargetSheet", true).Single()).SelectedItem = "追記試験";
+        ((TextBox)target.Controls.Find("TargetAddress", true).Single()).Text = "$D$30";
+        var chosen = target.Apply(TabularImportOptions.Infer([source], header: true));
+        ExcelTabularInserter.Import(com, app, window, new[] { source }, chosen);
+        Check((string)added.Range["D31"].Value2 == "山田", "非表示の出力先コントロールで変更したシートとセルへ書く");
     }
 }

@@ -9,6 +9,7 @@ internal static partial class Program
         using var com = new ComScope();
         dynamic app = com.Own(Activator.CreateInstance(Type.GetTypeFromProgID("Excel.Application")!)!);
         Native.GetWindowThreadProcessId((nint)(int)app.Hwnd, out uint pid);
+        Console.WriteLine($"専用の非表示Excel PID={pid}");
         if (existing.Contains((int)pid)) throw new InvalidOperationException("既存Excelを保護するため選択範囲の検証を中止しました。");
         try
         {
@@ -39,8 +40,8 @@ internal static partial class Program
                 TabularModalExcelTests(com, window, sheet);
                 V3ExcelTests(com, window, sheet);
             }
-            finally { book.Close(false); }
+            finally { try { book.Close(false); } catch (System.Runtime.InteropServices.COMException) { } }
         }
-        finally { app.Quit(); }
+        finally { try { app.Quit(); } catch (System.Runtime.InteropServices.COMException) { } }
     }
 }

@@ -33,6 +33,7 @@ internal static partial class Program
             ImportSelectionTests();
             TabularFormatTests();
             V3ModelTests(output);
+            V3InputTests(output);
             if (args.Contains("--large-preview")) LargeImportPreviewTests(output);
             var image = Path.Combine(output, "01-blue.png");
             using (var bitmap = new Bitmap(240, 120))

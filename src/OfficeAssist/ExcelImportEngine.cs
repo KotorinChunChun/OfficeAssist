@@ -130,8 +130,7 @@ internal static class ExcelImportEngine
             dynamic functions = com.Own(app.WorksheetFunction);
             if (range.MergeCells is not bool merged || merged || (double)functions.CountA(range) != 0 || range.HasArray is not bool array || array)
                 throw new InvalidOperationException($"展開先 {ExcelAddress.Display(range)} に値・数式・結合セルがあります。空のセルを指定してください。");
-            try { if (range.HasSpill is not bool spill || spill) throw new InvalidOperationException("展開先はスピル範囲と重なっています。"); }
-            catch (COMException ex) when ((uint)ex.HResult == 0x80020003) { throw new InvalidOperationException("スピル範囲を検査できないExcelです。新しいシートを使用してください。", ex); }
+            if (HasSpill(com, app, range)) throw new InvalidOperationException("展開先はスピル範囲と重なっています。");
             dynamic tables = com.Own(sheet.ListObjects), pivots = com.Own(sheet.PivotTables());
             for (int i = 1; i <= (int)tables.Count; i++) { dynamic table = com.Own(tables.Item(i)); if (app.Intersect(range, com.Own(table.Range)) is object overlap) { com.Own(overlap); throw new InvalidOperationException("展開先はExcelテーブルと重なっています。"); } }
             for (int i = 1; i <= (int)pivots.Count; i++) { dynamic pivot = com.Own(pivots.Item(i)); if (app.Intersect(range, com.Own(pivot.TableRange2)) is object overlap) { com.Own(overlap); throw new InvalidOperationException("展開先はピボットテーブルと重なっています。"); } }
@@ -162,8 +161,16 @@ internal static class ExcelImportEngine
                     dynamic dateBook = com.Own(((dynamic)write.Sheet).Parent);
                     AdjustDateSystem(values, write.Types, (bool)dateBook.Date1904);
                     dynamic cells = com.Own(target.Cells), first = com.Own(cells.Item(r + 1, 1)), chunk = com.Own(first.Resize[count, write.Table.ColumnCount]);
-                    for (int row = 0; row < count; row++) for (int c = 0; c < write.Table.ColumnCount; c++)
-                        if (values[row, c] is string && write.Types[c] is not (ColumnType.TextFormat or ColumnType.TextQuote)) { dynamic textCell = com.Own(cells.Item(r + row + 1, c + 1)); textCell.NumberFormat = "@"; }
+                    for (int c = 0; c < write.Table.ColumnCount; c++)
+                    {
+                        if (write.Types[c] is ColumnType.TextFormat or ColumnType.TextQuote) continue;
+                        for (int row = 0; row < count; row++)
+                        {
+                            if (values[row, c] is not string) continue; int start = row;
+                            while (row + 1 < count && values[row + 1, c] is string) row++;
+                            dynamic textRange = com.Own(cells.Item(r + start + 1, c + 1).Resize[row - start + 1, 1]); textRange.NumberFormat = "@";
+                        }
+                    }
                     chunk.Value2 = values;
                 }
             }
@@ -187,6 +194,34 @@ internal static class ExcelImportEngine
         int half = count / 2;
         SaveFormat(com, com.Own(cells.Item(1, 1).Resize[half, 1]), saved);
         SaveFormat(com, com.Own(cells.Item(half + 1, 1).Resize[count - half, 1]), saved);
+    }
+    static bool HasSpill(ComScope com, dynamic app, dynamic range)
+    {
+        try { object? value = range.HasSpill; if (value is bool spill) return spill; }
+        catch (COMException ex) when ((uint)ex.HResult is 0x800A03EC or 0x80020003 or 0x80020006) { }
+        object capability = app.Evaluate("IFERROR(ROWS(SEQUENCE(1)),0)");
+        if (capability is double unsupported && unsupported == 0) return false;
+        if (capability is not double supportedArrays || supportedArrays != 1) throw new InvalidOperationException("Excelの動的配列への対応を確認できませんでした。");
+        // HasSpillが利用できないExcelでは、数式アンカーの#参照を検査する。
+        dynamic sheet = com.Own(range.Parent), used = com.Own(sheet.UsedRange);
+        object formulaObject;
+        try { formulaObject = used.SpecialCells(-4123); }
+        catch (COMException ex) when ((uint)ex.HResult == 0x800A03EC) { return false; }
+        dynamic formulas = com.Own(formulaObject), areas = com.Own(formulas.Areas);
+        for (int a = 1; a <= (int)areas.Count; a++)
+        {
+            dynamic area = com.Own(areas.Item(a)), cells = com.Own(area.Cells);
+            for (int i = 1; i <= (int)cells.Count; i++)
+            {
+                dynamic cell = com.Own(cells.Item(i));
+                object isReference = sheet.Evaluate("ISREF(" + ExcelAddress.Display(cell) + "#)");
+                if (isReference is not bool supported) throw new InvalidOperationException("数式のスピル範囲を確認できませんでした。");
+                if (!supported) continue;
+                dynamic spilled = com.Own(cell.SpillingToRange);
+                if (app.Intersect(range, spilled) is object overlap) { com.Own(overlap); return true; }
+            }
+        }
+        return false;
     }
     internal static void AdjustDateSystem(object?[,] values, ColumnType[] types, bool date1904)
     {

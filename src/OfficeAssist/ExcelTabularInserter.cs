@@ -4,43 +4,58 @@ namespace OfficeAssist;
 
 internal static class ExcelTabularInserter
 {
-    internal static ExcelPictureInserter.Result? Insert(nint handle, Point point, IReadOnlyList<TabularData> tables)
+    internal static ExcelPictureInserter.Result? Insert(nint handle, Point point, ReceivedTabularBatch received)
     {
         if (!Native.IsWindow(handle) || Native.ClassName(handle) != "EXCEL7" || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2)))
             throw new InvalidOperationException("対象のExcelが閉じられたか、ダイアログを表示しています。");
-        using var com = new ComScope();
-        var iid = new Guid("00020400-0000-0000-C000-000000000046");
-        Marshal.ThrowExceptionForHR(Native.AccessibleObjectFromWindow(handle, 0xFFFFFFF0, ref iid, out object nativeWindow));
-        dynamic window = com.Own(nativeWindow);
-        object? hitObject = window.RangeFromPoint(point.X, point.Y);
-        if (hitObject is null) throw new InvalidOperationException("ワークシートのセルへドロップしてください。");
-        dynamic hit = com.Own(hitObject);
+        using var com = new ComScope(); dynamic window = ExcelConnection.Attach(com, handle), app = com.Own(window.Application);
+        object? hit = window.RangeFromPoint(point.X, point.Y);
+        if (hit is null) throw new InvalidOperationException("ワークシートのセルへドロップしてください。");
+        com.Own(hit);
+        try { dynamic cell = hit, rows = com.Own(cell.Rows), columns = com.Own(cell.Columns); if ((int)rows.Count != 1 || (int)columns.Count != 1) throw new InvalidOperationException("見出しではなくセルへドロップしてください。"); }
+        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { throw new InvalidOperationException("ワークシートのセルへドロップしてください。"); }
+        var owner = new ExcelWindowOwner(Native.GetAncestor(handle, 2));
+        var locks = new Dictionary<nint, ExcelModalLock> { [owner.Handle] = new(owner.Handle) };
+        IReadOnlyList<TabularData>? sources = null;
+        InputSelection? inputSelection = null;
         try
         {
-            dynamic rows = com.Own(hit.Rows), columns = com.Own(hit.Columns);
-            if ((int)rows.Count != 1 || (int)columns.Count != 1) throw new InvalidOperationException("見出しではなくセルへドロップしてください。");
+            if (received.HasFolders)
+            {
+                using var chooser = new FileSelectionForm(received.Inputs) { StartPosition = FormStartPosition.CenterParent };
+                if (chooser.ShowDialog(owner) != DialogResult.OK) return null;
+                inputSelection = chooser.Selection;
+            }
+            else
+            {
+                inputSelection = new(received.Inputs.Select(path => { var info = new FileInfo(path); return new InputCandidate(path, info.Length, info.LastWriteTimeUtc); }));
+            }
+            IReadOnlyList<TabularData>? Load(InputCandidate[] files, IWin32Window parent)
+            {
+                using var load = new TableLoadForm<IReadOnlyList<TabularData>>("CSV・TSVの読込み", token => received.Read(files, token)) { StartPosition = FormStartPosition.CenterParent };
+                if (load.ShowDialog(parent) != DialogResult.OK) { if (load.Error is not null) throw load.Error; return null; }
+                return load.Result;
+            }
+            sources = Load(inputSelection!.Selected, owner); if (sources is null) return null;
+            var targets = new ExcelTargetEditor(com, window);
+            targets.TargetWindowChanged = hwnd => { if (!locks.ContainsKey(hwnd)) locks[hwnd] = new(hwnd); };
+            targets.LockCurrentWindows();
+            TabularImportForm? dialog = null;
+            using (dialog = new TabularImportForm(sources, options =>
+            {
+                if (!Native.IsWindow(handle)) throw new InvalidOperationException("対象Excelを確認できません。");
+                return Import(com, app, window, dialog!.Tables, options);
+            }, targets: targets, reselect: () =>
+            {
+                using var chooser = new FileSelectionForm(received.Inputs, inputSelection) { StartPosition = FormStartPosition.CenterParent };
+                if (chooser.ShowDialog(dialog) != DialogResult.OK) return null;
+                var replacement = Load(chooser.Selected, dialog!); if (replacement is null) return null;
+                foreach (var table in sources) table.Rows.Dispose(); sources = replacement; inputSelection = chooser.Selection; return replacement;
+            }, defer: true))
+                return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Result : null;
         }
-        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
-        { throw new InvalidOperationException("ワークシートのセルへドロップしてください。"); }
-        dynamic originalSheet = com.Own(window.ActiveSheet);
-        dynamic originalBook = com.Own(originalSheet.Parent);
-        dynamic originalSelection = com.Own(window.RangeSelection);
-        string address = (string)originalSelection.Address;
-        string sheetName = (string)originalSheet.Name;
-        var owner = new ExcelWindowOwner(Native.GetAncestor(handle, 2));
-        using var modalLock = new ExcelModalLock(owner.Handle);
-        using var dialog = new TabularImportForm(tables, options =>
-        {
-            if (!Native.IsWindow(handle)) throw new InvalidOperationException("対象Excelを確認できません。もう一度ドロップしてください。");
-            dynamic currentSheet = com.Own(window.ActiveSheet), currentBook = com.Own(currentSheet.Parent), currentSelection = com.Own(window.RangeSelection);
-            if ((string)currentSheet.Name != sheetName || (string)currentBook.FullName != (string)originalBook.FullName || (string)currentSelection.Address != address)
-                throw new InvalidOperationException("設定中にブック・シート・選択範囲が変わりました。もう一度ドロップしてください。");
-            dynamic app = com.Own(window.Application);
-            return Import(com, app, window, tables, options);
-        }) { StartPosition = FormStartPosition.CenterParent };
-        return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Result : null;
+        finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); foreach (var modalLock in locks.Values.Reverse()) modalLock.Dispose(); }
     }
-
     internal static ExcelPictureInserter.Result Import(ComScope com, dynamic app, object? sourceWindow, IReadOnlyList<TabularData> tables, TabularImportOptions options)
     {
         ExcelImportEngine.Validate(tables, options);
@@ -127,3 +142,4 @@ internal static class ExcelTabularInserter
         return new($"{tables.Count}ファイルを展開しました（{lastSheet.Name}）。", warning);
     }
 }
+

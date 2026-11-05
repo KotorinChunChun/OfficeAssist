@@ -42,6 +42,7 @@ internal static partial class Program
         Check(tables[0].Rows[1][0] == "000001" && tables[1].Rows[1500][0] == "001500" && tables[0].Rows[1][4] == "前半1\n後半1", "大型サンプルの先頭ゼロ・最終行・改行を保持");
         using var form = new TabularImportForm(tables);
         form.Size = new Size(1500, 900); _ = form.Handle; form.PerformLayout();
+        ((ComboBox)form.Controls.Find("PreviewMode", true).Single()).SelectedIndex = (int)PreviewMode.All;
         var files = (ComboBox)form.Controls.Find("ImportFile", true).Single();
         var grid = (DataGridView)form.Controls.Find("ImportDataPreview", true).Single(); _ = grid.Handle;
         Check(grid.Columns.Count == 40 && grid.RowCount == 1500, "大型プレビューを全行の仮想表示で構成");
