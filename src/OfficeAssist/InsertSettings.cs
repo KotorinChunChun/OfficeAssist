@@ -3,12 +3,17 @@ using System.Text.Json;
 namespace OfficeAssist;
 
 internal enum DialogModifier { Shift, Ctrl, Alt }
+internal sealed record DropDialogBehavior(DialogModifier Modifier = DialogModifier.Shift, bool ImagesNormally = false, bool TablesNormally = true)
+{
+    internal bool Show(bool table, int keyState) => (table ? TablesNormally : ImagesNormally) != InsertSettings.IsPressed(Modifier, keyState);
+}
 
 internal static class InsertSettings
 {
     internal static InsertOptions Default => new(Destination.SelectionRange, PictureKind.Embedded, []);
     static string PathName => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OfficeAssist", "insert-settings.json");
-    sealed record StoredSettings(Destination Destination, PictureKind Kind, DialogModifier Modifier = DialogModifier.Shift);
+    sealed record StoredSettings(Destination Destination, PictureKind Kind, DialogModifier Modifier = DialogModifier.Shift,
+        bool ImagesNormally = false, bool TablesNormally = true);
 
     internal static InsertOptions Load(string? path = null)
     {
@@ -17,6 +22,7 @@ internal static class InsertSettings
     }
 
     internal static DialogModifier LoadModifier(string? path = null) => Read(path).Modifier;
+    internal static DropDialogBehavior LoadBehavior(string? path = null) { var saved = Read(path); return new(saved.Modifier, saved.ImagesNormally, saved.TablesNormally); }
 
     static StoredSettings Read(string? path = null)
     {
@@ -38,14 +44,16 @@ internal static class InsertSettings
         _ => throw new ArgumentOutOfRangeException(nameof(modifier))
     })) != 0;
 
-    internal static void Save(InsertOptions options, DialogModifier? modifier = null, string? path = null)
+    internal static void Save(InsertOptions options, DialogModifier? modifier = null, string? path = null, bool? imagesNormally = null, bool? tablesNormally = null)
     {
         path ??= PathName;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(new StoredSettings(options.Destination, options.Kind, modifier ?? LoadModifier(path))));
+            var previous = Read(path);
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new StoredSettings(options.Destination, options.Kind, modifier ?? previous.Modifier,
+                imagesNormally ?? previous.ImagesNormally, tablesNormally ?? previous.TablesNormally)));
             File.Move(temporary, path, true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }

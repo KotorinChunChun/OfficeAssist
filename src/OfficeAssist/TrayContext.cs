@@ -54,10 +54,10 @@ internal sealed class TrayContext : ApplicationContext
         try
         {
             using var dialog = new InsertOptionsForm("", 0, defaults: InsertSettings.Load(), settingsMode: true,
-                dialogModifier: InsertSettings.LoadModifier());
+                dialogModifier: InsertSettings.LoadModifier(), behavior: InsertSettings.LoadBehavior());
             if (dialog.ShowDialog() == DialogResult.OK && dialog.Options is not null)
             {
-                InsertSettings.Save(dialog.Options, dialog.Modifier);
+                InsertSettings.Save(dialog.Options, dialog.Modifier, imagesNormally: dialog.ImagesNormally, tablesNormally: dialog.TablesNormally);
                 window.SetResult("Excelドロップ設定を保存しました。");
             }
         }

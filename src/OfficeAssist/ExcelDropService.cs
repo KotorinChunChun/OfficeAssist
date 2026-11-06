@@ -71,8 +71,10 @@ internal sealed class ExcelDropService : IDisposable
         bool showOptions = false;
         try
         {
-            if (TabularInputDiscovery.Accepts(files)) tables = ReceivedTabularBatch.Capture(files);
-            else { showOptions = InsertSettings.IsPressed(InsertSettings.LoadModifier(), keyState); batch = ReceivedImageBatch.Capture(files); }
+            bool tabular = TabularInputDiscovery.Accepts(files);
+            showOptions = InsertSettings.LoadBehavior().Show(tabular, keyState);
+            if (tabular) tables = ReceivedTabularBatch.Capture(files);
+            else batch = ReceivedImageBatch.Capture(files);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException
             or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
@@ -86,7 +88,7 @@ internal sealed class ExcelDropService : IDisposable
             using var receivedTables = tables;
             try
             {
-                var result = tables is not null ? ExcelTabularInserter.Insert(handle, point, tables)
+                var result = tables is not null ? ExcelTabularInserter.Insert(handle, point, tables, showOptions)
                     : ExcelPictureInserter.InsertInteractive(handle, point, received!.Images, received.Originals, allowLinks, showOptions);
                 if (result is not null)
                 {

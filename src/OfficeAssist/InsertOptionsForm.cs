@@ -16,13 +16,17 @@ internal sealed class InsertOptionsForm : BrandedForm
     readonly Label urlLabel = new() { Text = "画像の HTTPS URL（1画像につき1行）", AutoSize = true };
     readonly ToolTip tips = new();
     readonly ComboBox modifier = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
+    readonly CheckBox imagesNormally = new() { Name = "ImagesDialogNormally", Text = "画像の挿入画面を表示する", AutoSize = true };
+    readonly CheckBox tablesNormally = new() { Name = "TablesDialogNormally", Text = "CSV・TSVの取り込み画面を表示する", AutoSize = true };
     readonly int fileCount;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal InsertOptions? Options { get; private set; }
     internal DialogModifier Modifier => (DialogModifier)modifier.SelectedIndex;
+    internal bool ImagesNormally => imagesNormally.Checked;
+    internal bool TablesNormally => tablesNormally.Checked;
 
     internal InsertOptionsForm(string selectedAddress, int count, bool allowLinkedImages = true, InsertOptions? defaults = null,
-        bool settingsMode = false, DialogModifier dialogModifier = DialogModifier.Shift)
+        bool settingsMode = false, DialogModifier dialogModifier = DialogModifier.Shift, DropDialogBehavior? behavior = null)
     {
         fileCount = count;
         linked.Name = "LinkedPictureOption";
@@ -44,6 +48,7 @@ internal sealed class InsertOptionsForm : BrandedForm
         tips.SetToolTip(fit, selectedAddress);
         modifier.Items.AddRange(["Shift", "Ctrl", "Alt"]);
         modifier.SelectedIndex = (int)dialogModifier;
+        imagesNormally.Checked = behavior?.ImagesNormally ?? false; tablesNormally.Checked = behavior?.TablesNormally ?? true;
         static GroupBox Group(string text, params Control[] controls)
         {
             var group = new GroupBox { Text = text, Dock = DockStyle.Fill, Padding = new Padding(8) };
@@ -53,12 +58,16 @@ internal sealed class InsertOptionsForm : BrandedForm
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 1, RowCount = 5 };
         foreach (int height in new[] { 95, 62, 26, 0, 42 })
             layout.RowStyles.Add(height == 0 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.Absolute, height));
-        layout.Controls.Add(Group("挿入先", drop, selection, fit), 0, 0);
-        layout.Controls.Add(Group("挿入形式", embedded, linked, formula), 0, 1);
+        layout.Controls.Add(Group(settingsMode ? "画像の挿入先" : "挿入先", drop, selection, fit), 0, 0);
+        layout.Controls.Add(Group(settingsMode ? "画像の挿入形式" : "挿入形式", embedded, linked, formula), 0, 1);
         if (settingsMode)
         {
-            layout.RowStyles[2].Height = 62;
-            layout.Controls.Add(Group("設定画面を開く修飾キー", modifier), 0, 2);
+            ClientSize = new Size(520, 415); layout.RowStyles[2].Height = 68;
+            layout.Controls.Add(Group("表示・省略を切り替える修飾キー", modifier), 0, 2);
+            layout.Controls.Add(Group("通常ドロップ時", imagesNormally, tablesNormally), 0, 3);
+            tips.SetToolTip(modifier, "押しながらドロップすると、通常時とは逆の表示・省略になります。");
+            tips.SetToolTip(imagesNormally, "OFFなら通常は省略し、修飾キーで表示します。ONなら通常は表示し、修飾キーで省略します。");
+            tips.SetToolTip(tablesNormally, "省略時は前回の取り込み設定を使います。初回は指定セル・自動判定です。");
         }
         else { layout.Controls.Add(urlLabel, 0, 2); layout.Controls.Add(urls, 0, 3); }
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };

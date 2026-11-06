@@ -4,7 +4,7 @@ namespace OfficeAssist;
 
 internal static class ExcelTabularInserter
 {
-    internal static ExcelPictureInserter.Result? Insert(nint handle, Point point, ReceivedTabularBatch received)
+    internal static ExcelPictureInserter.Result? Insert(nint handle, Point point, ReceivedTabularBatch received, bool showOptions = true)
     {
         if (!Native.IsWindow(handle) || Native.ClassName(handle) != "EXCEL7" || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2)))
             throw new InvalidOperationException("対象のExcelが閉じられたか、ダイアログを表示しています。");
@@ -12,6 +12,7 @@ internal static class ExcelTabularInserter
         object? hit = window.RangeFromPoint(point.X, point.Y);
         if (hit is null) throw new InvalidOperationException("ワークシートのセルへドロップしてください。");
         com.Own(hit);
+        var defaults = TabularDropSettings.Load();
         try { dynamic cell = hit, rows = com.Own(cell.Rows), columns = com.Own(cell.Columns); if ((int)rows.Count != 1 || (int)columns.Count != 1) throw new InvalidOperationException("見出しではなくセルへドロップしてください。"); }
         catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { throw new InvalidOperationException("ワークシートのセルへドロップしてください。"); }
         var owner = new ExcelWindowOwner(Native.GetAncestor(handle, 2));
@@ -28,7 +29,7 @@ internal static class ExcelTabularInserter
             }
             else
             {
-                inputSelection = new(received.Inputs.Select(path => { var info = new FileInfo(path); return new InputCandidate(path, info.Length, info.LastWriteTimeUtc); }));
+                inputSelection = new(received.Inputs.Select(path => { var info = new FileInfo(path); return new InputCandidate(path, info.Length, info.LastWriteTimeUtc) { Encoding = defaults.Encoding }; }));
             }
             IReadOnlyList<TabularData>? Load(InputCandidate[] files, IWin32Window parent)
             {
@@ -45,6 +46,26 @@ internal static class ExcelTabularInserter
                     using var chooser = new FileSelectionForm(received.Inputs, inputSelection) { StartPosition = FormStartPosition.CenterParent };
                     if (chooser.ShowDialog(owner) != DialogResult.OK) return null;
                     inputSelection = chooser.Selection;
+                }
+            }
+            if (!showOptions)
+            {
+                ExcelPictureInserter.Result? automatic = null;
+                try
+                {
+                    var prepared = defaults.Prepare(sources);
+                    using var cancellation = new CancellationTokenSource();
+                    automatic = Import(com, app, window, prepared.Tables, prepared.Options with { Cancellation = cancellation.Token,
+                        Progress = _ => { Application.DoEvents(); if ((Native.GetAsyncKeyState(27) & 0x8000) != 0) cancellation.Cancel(); } });
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(owner, ex.Message + Environment.NewLine + "取り込み設定を確認してください。", WindowTitle.Create("CSV・TSVの取り込み"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                if (automatic is not null)
+                {
+                    if (automatic.Warning is not null) MessageBox.Show(owner, automatic.Warning, WindowTitle.Create("CSV・TSVの取り込み"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return automatic;
                 }
             }
             var targets = new ExcelTargetEditor(com, window);
@@ -73,8 +94,19 @@ internal static class ExcelTabularInserter
                 if (replacement is null) return null;
                 var next = new InputSelection(changed); foreach (var file in changed) next.Check(file.Path, inputSelection.IsChecked(file.Path));
                 foreach (var table in sources) table.Rows.Dispose(); sources = replacement; inputSelection = next; return replacement;
-            }, previewContext: previewContext.Capture))
-                return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Result : null;
+            }, previewContext: previewContext.Capture, defaults: defaults))
+            {
+                if (dialog.ShowDialog(owner) != DialogResult.OK || dialog.Result is null) return null;
+                var encodings = inputSelection!.Selected.Select(f => f.Encoding).Distinct().ToArray();
+                try { TabularDropSettings.Save(dialog.CreateDropProfile(encodings.Length == 1 ? encodings[0] : TableEncoding.Auto, encodings.Length > 1)); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    string warning = "取り込みは完了しましたが、次回の設定を保存できませんでした。 " + ex.Message;
+                    MessageBox.Show(owner, warning, WindowTitle.Create("CSV・TSVの取り込み"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return dialog.Result with { Warning = warning };
+                }
+                return dialog.Result;
+            }
         }
         finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); foreach (var modalLock in locks.Values.Reverse()) modalLock.Dispose(); }
     }

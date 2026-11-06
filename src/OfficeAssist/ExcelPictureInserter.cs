@@ -61,7 +61,7 @@ internal static class ExcelPictureInserter
         if (interactive)
         {
             options = InsertSettings.Load();
-            if (showOptions)
+            if (showOptions || options.Kind == PictureKind.ImageFormula)
             {
                 using var dialog = new InsertOptionsForm(ExcelAddress.Display(selected), files.Count, allowLinkedImages, options);
                 if (dialog.ShowDialog() != DialogResult.OK || dialog.Options is null) return null;

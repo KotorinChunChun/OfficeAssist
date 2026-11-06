@@ -35,6 +35,7 @@ internal static partial class Program
             if (args.Contains("--preview-performance-tests")) { PreviewPerformanceTests(); Console.WriteLine($"PASS: {count}件"); return 0; }
             if (args.Contains("--preview-final-check")) { PreviewPerformanceTests(); FormattedPreviewExcelTests(); FormattedPreviewFormTests(); }
             DropTests();
+            DropDialogTests(output);
             TabularTests(output);
             ImportSelectionTests();
             TabularFormatTests();

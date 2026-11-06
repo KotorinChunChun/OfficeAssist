@@ -40,6 +40,7 @@ internal static partial class Program
                 TabularModalExcelTests(com, window, sheet);
                 V3ExcelTests(com, window, sheet);
                 V22FixtureExcelTests(com, window, sheet, output);
+                DropDialogExcelTests(com, window, sheet);
             }
             finally { try { book.Close(false); } catch (System.Runtime.InteropServices.COMException) { } }
         }

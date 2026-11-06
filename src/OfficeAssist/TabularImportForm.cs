@@ -85,20 +85,33 @@ internal sealed partial class TabularImportForm : BrandedForm
         Func<IReadOnlyList<TabularData>?>? reselect = null, bool defer = false,
         Func<string?, int>? readEncoding = null, Func<string?, TableEncoding, IReadOnlyList<TabularData>?>? reencode = null,
         IExcelFormatPreview? formatPreview = null,
-        Func<IReadOnlyList<TabularData>, TabularImportOptions, int, IReadOnlyList<(int Row, int Column)>, ExcelPreviewSnapshot>? previewContext = null)
+        Func<IReadOnlyList<TabularData>, TabularImportOptions, int, IReadOnlyList<(int Row, int Column)>, ExcelPreviewSnapshot>? previewContext = null,
+        TabularDropProfile? defaults = null)
     {
         if (tables.Count == 0) throw new ArgumentException("ファイルがありません。", nameof(tables));
         sources = tables; usePreviewCache = defer; this.tables = defer ? new[] { new TabularData("読込中", [[""]]) } : tables;
         selection = new(this.tables); this.targets = targets; this.reselect = reselect;
         this.execute = execute; this.showMessage = showMessage ?? ((owner, message, icon) => MessageBox.Show(owner, message, Text, MessageBoxButtons.OK, icon));
         this.readEncoding = readEncoding; this.reencode = reencode;
+        pendingDefaults = defaults;
+        if (!defer && defaults is not null)
+        {
+            var prepared = defaults.Prepare(sources, strict: false); this.tables = prepared.Tables; selection = prepared.Selection;
+            currentKey = defaults.Rows?.Merge == true ? "merged" : "file"; currentByName = defaults.Rows?.MergeByName == true && selection.Header;
+        }
         Text = WindowTitle.Create("CSV・TSVの取り込み"); StartPosition = FormStartPosition.CenterParent;
         ClientSize = new(1180, 760); MinimumSize = new(860, 600); MinimizeBox = false; MaximizeBox = true; ShowInTaskbar = false; TopMost = true; Font = new("Yu Gothic UI", 10);
-        destination.Items.AddRange(["新しいブック", "新しいシート", "指定セル", "同名のシートに追記"]); destination.SelectedIndex = (int)ImportDestination.Selection;
+        destination.Items.AddRange(["新しいブック", "新しいシート", "指定セル", "同名のシートに追記"]); destination.SelectedIndex = (int)(defaults?.Destination ?? ImportDestination.Selection);
         mergeBy.Items.AddRange(["列順", "列名"]); mergeBy.SelectedIndex = 0;
         previewMode.Items.AddRange(["しない", "各ファイル先頭10行", "すべて"]); previewMode.SelectedIndex = 1;
         encoding.Items.AddRange(TabularEncoding.Labels.Concat(new[] { "ファイル別（混在）" }).ToArray()); encoding.SelectedIndex = 0; encoding.Enabled = reencode is not null;
         header.Checked = selection.Header;
+        if (defaults is not null)
+        {
+            var rules = defaults.Rows ?? new(); skipFirst.Value = rules.SkipFirst; skipLast.Value = rules.SkipLast; dropEmpty.Checked = rules.DropEmpty; merge.Checked = rules.Merge;
+            mergeBy.SelectedIndex = rules.MergeByName ? 1 : 0; previewMode.SelectedIndex = (int)defaults.Preview; applyToAll.Checked = defaults.ApplyToAll;
+            header.Checked = defaults.Header ?? selection.Header; headerEdited = defaults.Header.HasValue;
+        }
         var top = Bar(); top.Controls.AddRange([LabelFor("展開先"), destination]); if (targets is not null) top.Controls.Add(targets);
         var rows = Bar(); rows.Controls.AddRange([LabelFor("先頭から除外"), skipFirst, LabelFor("行　末尾から除外"), skipLast, LabelFor("行"), dropEmpty, LabelFor("文字コード"), encoding]);
         var modeBar = Bar(); modeBar.Controls.AddRange([merge, header, mergeByLabel, mergeBy, LabelFor("プレビュー"), previewMode, chooseFiles, validationDetails]);
@@ -140,8 +153,9 @@ internal sealed partial class TabularImportForm : BrandedForm
         foreach (int height in new[] { 76, 42, 76, 40, 164, 0, 38, 42 }) layout.RowStyles.Add(height == 0 ? new(SizeType.Percent, 100) : new(SizeType.Absolute, height));
         Control[] controls = [top, rows, modeBar, fileBar, settingsViewport, preview, status, buttons]; for (int i = 0; i < controls.Length; i++) layout.Controls.Add(controls[i], 0, i); Controls.Add(layout);
         FormClosing += (_, e) => { if (working || tasks > 0) { CancelPreviewWork(); writeCancellation?.Cancel(); rebuildCancellation?.Cancel(); pendingClose = true; e.Cancel = true; } };
-        Shown += async (_, _) => { BringToFront(); Activate(); if (defer) await Rebuild(autoHeader: true); };
+        Shown += async (_, _) => { BringToFront(); Activate(); if (defer) await Rebuild(autoHeader: !headerEdited); };
         InitializeFormatting(formatPreview ?? (defer ? SharedExcelFormatPreview.Acquire() : null), previewContext);
+        if (!defer) RestoreDefaultColumns();
         PopulateFiles(); UpdateModes(); Populate(); if (defer) { valid = false; import.Enabled = false; }
     }
     static Label LabelFor(string text) => new() { Text = text, AutoSize = true, Padding = new(0, 5, 0, 0) };
@@ -178,6 +192,7 @@ internal sealed partial class TabularImportForm : BrandedForm
             if (revision != generation || cancellation.IsCancellationRequested) return;
             tables = built.result.Tables; selection = built.model; currentKey = rules.Merge ? "merged" : "file"; currentByName = rules.MergeByName && hasHeader;
             updating = true; header.Checked = hasHeader; updating = false;
+            RestoreDefaultColumns();
             for (int f = 0; f < tables.Count; f++) for (int c = 0; c < tables[f].ColumnCount; c++) if (edits.TryGetValue(EditKey(f, c, currentKey, currentByName), out var edit)) { if (edit.Type.HasValue) selection.SetType(f, c, edit.Type.Value); if (edit.Decimals.HasValue) selection.SetDecimals(f, c, edit.Decimals.Value); }
             if (rules.Merge) { selection.SetType(0, 0, ColumnType.TextFormat); selection.SetDecimals(0, 0, 0); }
             else selection.SetApplyToAll(applyToAll.Checked, 0);
