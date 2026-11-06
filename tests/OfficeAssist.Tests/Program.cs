@@ -29,6 +29,7 @@ internal static partial class Program
         try
         {
             if (args.Contains("--create-import-cases")) { var cases = ImportFixtureSet.Create(output); Console.WriteLine($"生成: {cases.Length}ケース → {output}"); return 0; }
+            if (args.Contains("--format-preview-com")) { FormattedPreviewExcelTests(); Console.WriteLine($"PASS: {count}件"); return 0; }
             DropTests();
             TabularTests(output);
             ImportSelectionTests();

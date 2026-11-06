@@ -73,7 +73,7 @@ internal static class ExcelImportEngine
         for (int t = 0; t < tables.Count; t++)
         {
             var source = tables[t]; string name = Path.GetFileNameWithoutExtension(source.Name);
-            if (name.Length is 0 or > 31 || name.IndexOfAny("[]:*?/\\".ToCharArray()) >= 0 || name.StartsWith('\'') || name.EndsWith('\'')) throw new InvalidDataException($"{source.Name}: 同名シートとして使用できない名前です。");
+            ExcelAppendSchema.ValidateName(name);
             dynamic sheet;
             try { sheet = ResolveSheet(com, book, name); }
             catch (InvalidOperationException)
@@ -83,30 +83,13 @@ internal static class ExcelImportEngine
             }
             if (!nextRows.TryGetValue(name, out int next))
             {
-                dynamic cells = com.Own(sheet.Cells);
-                object? lastObject = cells.Find("*", After: com.Own(cells.Item(1, 1)), LookIn: -4123, LookAt: 2, SearchOrder: 1, SearchDirection: 2, MatchCase: false, MatchByte: false, SearchFormat: false);
-                if (lastObject is null) next = 1;
-                else { dynamic last = com.Own(lastObject); next = (int)last.Row + 1; }
-                if (next > 1)
-                {
-                    object? rightObject = cells.Find("*", After: com.Own(cells.Item(1, 1)), LookIn: -4123, LookAt: 2, SearchOrder: 2, SearchDirection: 2, MatchCase: false, MatchByte: false, SearchFormat: false);
-                    dynamic right = com.Own(rightObject!); int width = (int)right.Column;
-                    if (options.Header)
-                    { dynamic range = com.Own(sheet.Range["A1"].Resize[1, width]); object raw = range.Value2; headers[name] = Enumerable.Range(0, width).Select(c => raw is Array a ? Convert.ToString(a.GetValue(1, c + 1)) ?? "" : Convert.ToString(raw) ?? "").ToArray(); }
-                    else headers[name] = new string[width];
-                }
+                (int NextRow, string[] Headers) state = ExcelAppendSchema.Read(com, sheet, options.Header);
+                next = state.NextRow; if (next > 1) headers[name] = state.Headers;
             }
             var data = source; var types = options.Types[t]; var decimals = Enumerable.Range(0, source.ColumnCount).Select(c => options.Decimals(t, c)).ToArray(); bool outputHeader = options.Header;
             if (next > 1)
             {
-                int[] map;
-                if (options.Header)
-                {
-                    var existing = TabularTransform.HeaderKeys(headers[name]); var input = TabularTransform.HeaderKeys(source.Rows[0]);
-                    if (input.Length != source.ColumnCount || input.Any(key => !existing.Contains(key))) throw new InvalidDataException($"{source.Name}: 既存シートにない列があります。");
-                    map = existing.Select(key => Array.IndexOf(input, key)).ToArray();
-                }
-                else { if (headers[name].Length != source.ColumnCount) throw new InvalidDataException($"{source.Name}: 既存シートと列数が異なります。"); map = Enumerable.Range(0, source.ColumnCount).ToArray(); }
+                int[] map = ExcelAppendSchema.Map(source, headers[name], options.Header);
                 int skip = options.Header ? 1 : 0;
                 data = new(source.Name, new TabularRows(source.RowCount - skip, map.Length, r => { var row = source.Rows[r + skip]; return map.Select(c => c >= 0 && c < row.Length ? row[c] : "").ToArray(); })) { Origin = r => source.Origin?.Invoke(r + skip) ?? $"{source.Name}: 行{r + skip + 1}" };
                 types = map.Select(c => c >= 0 ? options.Types[t][c] : ColumnType.TextFormat).ToArray();
@@ -149,8 +132,7 @@ internal static class ExcelImportEngine
                 for (int c = 0; c < write.Table.ColumnCount; c++)
                 {
                     dynamic column = com.Own(targetColumns.Item(c + 1)); SaveFormat(com, column, saved);
-                    string format = ColumnConversion.Format(write.Types[c], write.Decimals[c]);
-                    if (write.Types[c] is ColumnType.General or ColumnType.TextQuote) column.NumberFormatLocal = (string)app.International[26]; else column.NumberFormat = format;
+                    ExcelValueFormat.Apply(app, column, ExcelValueFormat.Code(write.Types[c], write.Decimals[c]));
                 }
                 int step = ChunkRows(write.Table);
                 for (int r = 0; r < write.Table.RowCount; r += step)
@@ -168,7 +150,7 @@ internal static class ExcelImportEngine
                         {
                             if (values[row, c] is not string) continue; int start = row;
                             while (row + 1 < count && values[row + 1, c] is string) row++;
-                            dynamic textRange = com.Own(cells.Item(r + start + 1, c + 1).Resize[row - start + 1, 1]); textRange.NumberFormat = "@";
+                            dynamic textRange = com.Own(cells.Item(r + start + 1, c + 1).Resize[row - start + 1, 1]); ExcelValueFormat.Apply(app, textRange, "@");
                         }
                     }
                     chunk.Value2 = values;
@@ -200,8 +182,15 @@ internal static class ExcelImportEngine
         try { object? value = range.HasSpill; if (value is bool spill) return spill; }
         catch (COMException ex) when ((uint)ex.HResult is 0x800A03EC or 0x80020003 or 0x80020006) { }
         object capability = app.Evaluate("IFERROR(ROWS(SEQUENCE(1)),0)");
-        if (capability is double unsupported && unsupported == 0) return false;
-        if (capability is not double supportedArrays || supportedArrays != 1) throw new InvalidOperationException("Excelの動的配列への対応を確認できませんでした。");
+        double capabilityValue = capability is double or int or short or decimal ? Convert.ToDouble(capability, System.Globalization.CultureInfo.InvariantCulture) : double.NaN;
+        if (capabilityValue is not (0 or 1))
+        {
+            // 小数点がカンマのユーザー設定ではEvaluateの引数区切りも変わる場合がある。
+            capability = app.Evaluate("IFERROR(ROWS(SEQUENCE(1));0)");
+            capabilityValue = capability is double or int or short or decimal ? Convert.ToDouble(capability, System.Globalization.CultureInfo.InvariantCulture) : double.NaN;
+        }
+        if (capabilityValue == 0) return false;
+        if (capabilityValue != 1) throw new InvalidOperationException($"Excelの動的配列への対応を確認できませんでした（{capability.GetType().Name}:{capabilityValue}）。");
         // HasSpillが利用できないExcelでは、数式アンカーの#参照を検査する。
         dynamic sheet = com.Own(range.Parent), used = com.Own(sheet.UsedRange);
         object formulaObject;
@@ -227,6 +216,6 @@ internal static class ExcelImportEngine
     {
         if (!date1904) return;
         for (int r = 0; r < values.GetLength(0); r++) for (int c = 0; c < types.Length; c++)
-            if (values[r, c] is double value && (ColumnConversion.IsDate(types[c]) || types[c] == ColumnType.Time && value >= 1)) values[r, c] = value - 1462;
+            values[r, c] = ExcelValueFormat.AdjustSerial(values[r, c], types[c], date1904);
     }
 }
