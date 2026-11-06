@@ -26,7 +26,7 @@ internal sealed class ImportComboBox : ComboBox
     }
 }
 
-internal sealed class TabularImportForm : BrandedForm
+internal sealed partial class TabularImportForm : BrandedForm
 {
     const int ColumnWidth = 240, RowHeaderWidth = 48;
     readonly ImportComboBox destination = new() { Name = "ImportDestination", Width = 210 };
@@ -42,7 +42,7 @@ internal sealed class TabularImportForm : BrandedForm
     readonly ImportComboBox encoding = new() { Name = "ImportEncoding", Width = 190 };
     readonly Label mergeByLabel = LabelFor("結合基準");
     readonly Panel settingsViewport = new() { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
-    readonly Panel settings = new() { Height = 108 };
+    readonly Panel settings = new() { Height = 144 };
     readonly HScrollBar settingsScroll = new() { Dock = DockStyle.Bottom, SmallChange = 60 };
     readonly DataGridView preview = new() { Name = "ImportDataPreview", Dock = DockStyle.Fill, ReadOnly = true, VirtualMode = true,
         AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToOrderColumns = false,
@@ -83,7 +83,9 @@ internal sealed class TabularImportForm : BrandedForm
     internal TabularImportForm(IReadOnlyList<TabularData> tables, Func<TabularImportOptions, ExcelPictureInserter.Result>? execute = null,
         Action<IWin32Window, string, MessageBoxIcon>? showMessage = null, ExcelTargetEditor? targets = null,
         Func<IReadOnlyList<TabularData>?>? reselect = null, bool defer = false,
-        Func<string?, int>? readEncoding = null, Func<string?, TableEncoding, IReadOnlyList<TabularData>?>? reencode = null)
+        Func<string?, int>? readEncoding = null, Func<string?, TableEncoding, IReadOnlyList<TabularData>?>? reencode = null,
+        IExcelFormatPreview? formatPreview = null,
+        Func<IReadOnlyList<TabularData>, TabularImportOptions, int, IReadOnlyList<(int Row, int Column)>, ExcelPreviewSnapshot>? previewContext = null)
     {
         if (tables.Count == 0) throw new ArgumentException("ファイルがありません。", nameof(tables));
         sources = tables; usePreviewCache = defer; this.tables = defer ? new[] { new TabularData("読込中", [[""]]) } : tables;
@@ -99,14 +101,14 @@ internal sealed class TabularImportForm : BrandedForm
         header.Checked = selection.Header;
         var top = Bar(); top.Controls.AddRange([LabelFor("展開先"), destination]); if (targets is not null) top.Controls.Add(targets);
         var rows = Bar(); rows.Controls.AddRange([LabelFor("先頭から除外"), skipFirst, LabelFor("行　末尾から除外"), skipLast, LabelFor("行"), dropEmpty, LabelFor("文字コード"), encoding]);
-        var modeBar = Bar(); modeBar.Controls.AddRange([merge, header, mergeByLabel, mergeBy, LabelFor("プレビュー"), previewMode, chooseFiles]);
+        var modeBar = Bar(); modeBar.Controls.AddRange([merge, header, mergeByLabel, mergeBy, LabelFor("プレビュー"), previewMode, chooseFiles, validationDetails]);
         fileBar.Controls.AddRange([LabelFor("ファイル名を選択"), files, applyToAll]);
         tips.SetToolTip(applyToAll, "他のファイルの同じ列番号へ列形式と小数桁を適用します。行除外は全ファイル共通です。");
         settingsViewport.Controls.Add(settings); settingsViewport.Controls.Add(settingsScroll);
         preview.RowTemplate.Height = 27; preview.DefaultCellStyle.BackColor = SystemColors.Window; preview.DefaultCellStyle.ForeColor = SystemColors.WindowText;
         preview.DefaultCellStyle.SelectionBackColor = SystemColors.Highlight; preview.DefaultCellStyle.SelectionForeColor = SystemColors.HighlightText;
-        preview.CellValueNeeded += (_, e) => { if (e.RowIndex >= 0 && e.RowIndex < previewRows.Length && e.ColumnIndex >= 0) { var row = usePreviewCache ? previewCache?.Get(previewRows[e.RowIndex]) : this.tables[SelectedFile].Rows[previewRows[e.RowIndex]]; e.Value = row is null ? "" : e.ColumnIndex < row.Length ? row[e.ColumnIndex] : ""; } };
-        preview.CellToolTipTextNeeded += (_, e) => { if (e.RowIndex >= 0 && e.RowIndex < previewRows.Length) e.ToolTipText = this.tables[SelectedFile].Origin?.Invoke(previewRows[e.RowIndex]) ?? "行" + (previewRows[e.RowIndex] + 1); };
+        preview.CellValueNeeded += (_, e) => { if (e.RowIndex >= 0 && e.RowIndex < previewRows.Length && e.ColumnIndex >= 0) { if (formattedPreview is not null) { e.Value = valid ? formattedPreview.Get(previewRows[e.RowIndex], e.ColumnIndex)?.Display ?? "…" : ""; } else { var row = usePreviewCache ? previewCache?.Get(previewRows[e.RowIndex]) : this.tables[SelectedFile].Rows[previewRows[e.RowIndex]]; e.Value = row is null ? "" : e.ColumnIndex < row.Length ? row[e.ColumnIndex] : ""; } } };
+        preview.CellToolTipTextNeeded += (_, e) => { if (e.RowIndex >= 0 && e.RowIndex < previewRows.Length) e.ToolTipText = PreviewToolTip(previewRows[e.RowIndex], e.ColumnIndex); };
         preview.RowPostPaint += (_, e) => { if (e.RowIndex < previewRows.Length) TextRenderer.DrawText(e.Graphics, (previewRows[e.RowIndex] + 1).ToString(), Font,
             new Rectangle(e.RowBounds.Left, e.RowBounds.Top, preview.RowHeadersWidth - 4, e.RowBounds.Height), SystemColors.ControlText, TextFormatFlags.Right | TextFormatFlags.VerticalCenter); };
         preview.Scroll += (_, _) => { if (preview.HorizontalScrollingOffset <= settingsScroll.Maximum) settingsScroll.Value = preview.HorizontalScrollingOffset; PopulateSettings(); };
@@ -118,7 +120,8 @@ internal sealed class TabularImportForm : BrandedForm
         previewMode.SelectedIndexChanged += (_, _) => Populate();
         encoding.SelectedIndexChanged += async (_, _) =>
         {
-            if (updating || working || tasks > 0 || encoding.SelectedIndex is < 0 or > 4 || this.reencode is null) return;
+            if (updating || working || !valid || encoding.SelectedIndex is < 0 or > 4 || this.reencode is null) return;
+            CancelPreviewWork(); await validationWork;
             try
             {
                 string? file = merge.Checked || applyToAll.Checked ? null : this.tables[SelectedFile].SourcePath;
@@ -126,18 +129,19 @@ internal sealed class TabularImportForm : BrandedForm
                 if (decoded is not null) { sources = decoded; edits.Clear(); await Rebuild(autoHeader: !headerEdited); }
             }
             catch (Exception ex) { this.showMessage(this, ex.Message, MessageBoxIcon.Warning); }
-            finally { SyncEncoding(); }
+            finally { SyncEncoding(); RefreshFormatting(); }
         };
-        destination.SelectedIndexChanged += (_, _) => UpdateModes();
-        applyToAll.CheckedChanged += (_, _) => { if (!updating && valid) { selection.SetApplyToAll(applyToAll.Checked, SelectedFile); if (applyToAll.Checked) for (int c = 0; c < tables[SelectedFile].ColumnCount; c++) { Remember(SelectedFile, c, true); Remember(SelectedFile, c, false); } PopulateSettings(); SyncEncoding(); } };
-        chooseFiles.Enabled = reselect is not null; chooseFiles.Click += async (_, _) => { try { var selected = this.reselect?.Invoke(); if (selected is null) return; sources = selected; edits.Clear(); await Rebuild(); } catch (Exception ex) { this.showMessage(this, ex.Message, MessageBoxIcon.Warning); } };
-        import.Click += (_, _) => TryImport(); cancel.Click += (_, _) => { if (working) writeCancellation?.Cancel(); else if (tasks > 0) { pendingClose = true; rebuildCancellation?.Cancel(); } else { DialogResult = DialogResult.Cancel; Close(); } };
+        destination.SelectedIndexChanged += (_, _) => { UpdateModes(); RefreshFormatting(); };
+        applyToAll.CheckedChanged += (_, _) => { if (!updating && valid) { selection.SetApplyToAll(applyToAll.Checked, SelectedFile); if (applyToAll.Checked) for (int c = 0; c < tables[SelectedFile].ColumnCount; c++) { Remember(SelectedFile, c, true); Remember(SelectedFile, c, false); } PopulateSettings(); SyncEncoding(); RefreshFormatting(); } };
+        chooseFiles.Enabled = reselect is not null; chooseFiles.Click += async (_, _) => { CancelPreviewWork(); await validationWork; try { var selected = this.reselect?.Invoke(); if (selected is null) return; sources = selected; edits.Clear(); await Rebuild(); } catch (Exception ex) { this.showMessage(this, ex.Message, MessageBoxIcon.Warning); } finally { RefreshFormatting(); } };
+        import.Click += (_, _) => TryImport(); cancel.Click += (_, _) => { CancelPreviewWork(); if (working) writeCancellation?.Cancel(); else if (tasks > 0) { pendingClose = true; rebuildCancellation?.Cancel(); } else { DialogResult = DialogResult.Cancel; Close(); } };
         var buttons = Bar(); buttons.FlowDirection = FlowDirection.RightToLeft; buttons.Controls.AddRange([cancel, import]);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(12), ColumnCount = 1, RowCount = 8 };
-        foreach (int height in new[] { 76, 42, 76, 40, 130, 0, 38, 42 }) layout.RowStyles.Add(height == 0 ? new(SizeType.Percent, 100) : new(SizeType.Absolute, height));
+        foreach (int height in new[] { 76, 42, 76, 40, 164, 0, 38, 42 }) layout.RowStyles.Add(height == 0 ? new(SizeType.Percent, 100) : new(SizeType.Absolute, height));
         Control[] controls = [top, rows, modeBar, fileBar, settingsViewport, preview, status, buttons]; for (int i = 0; i < controls.Length; i++) layout.Controls.Add(controls[i], 0, i); Controls.Add(layout);
-        FormClosing += (_, e) => { if (working || tasks > 0) { writeCancellation?.Cancel(); rebuildCancellation?.Cancel(); pendingClose = true; e.Cancel = true; } };
+        FormClosing += (_, e) => { if (working || tasks > 0) { CancelPreviewWork(); writeCancellation?.Cancel(); rebuildCancellation?.Cancel(); pendingClose = true; e.Cancel = true; } };
         Shown += async (_, _) => { BringToFront(); Activate(); if (defer) await Rebuild(autoHeader: true); };
+        InitializeFormatting(formatPreview ?? (defer ? new ExcelFormatPreview() : null), previewContext);
         PopulateFiles(); UpdateModes(); Populate(); if (defer) { valid = false; import.Enabled = false; }
     }
     static Label LabelFor(string text) => new() { Text = text, AutoSize = true, Padding = new(0, 5, 0, 0) };
@@ -157,6 +161,7 @@ internal sealed class TabularImportForm : BrandedForm
     async Task Rebuild(bool autoHeader = false)
     {
         if (updating || working) return;
+        CancelPreviewWork();
         int revision = ++generation; rebuildCancellation?.Cancel(); var cancellation = new CancellationTokenSource(); rebuildCancellation = cancellation; tasks++;
         valid = false; import.Enabled = chooseFiles.Enabled = encoding.Enabled = false; status.Text = "行加工・列形式を解析中";
         var rules = new TableTransformOptions((int)skipFirst.Value, (int)skipLast.Value, dropEmpty.Checked, merge.Checked, merge.Checked && mergeBy.SelectedIndex == 1);
@@ -180,7 +185,7 @@ internal sealed class TabularImportForm : BrandedForm
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (revision == generation) { status.Text = ex.Message; previewRows = []; preview.RowCount = 0; } }
-        finally { tasks--; cancellation.Dispose(); if (revision == generation) { rebuildCancellation = null; import.Enabled = valid; chooseFiles.Enabled = reselect is not null; encoding.Enabled = reencode is not null; } if (pendingClose && tasks == 0) { DialogResult = DialogResult.Cancel; Close(); } }
+        finally { tasks--; cancellation.Dispose(); if (revision == generation) { rebuildCancellation = null; import.Enabled = valid && FormattingAllowsImport; chooseFiles.Enabled = reselect is not null; encoding.Enabled = reencode is not null; } if (pendingClose && tasks == 0) { DialogResult = DialogResult.Cancel; Close(); } }
     }
     void UpdateModes()
     {
@@ -193,7 +198,7 @@ internal sealed class TabularImportForm : BrandedForm
     void PopulateFiles() { updating = true; int selected = files.SelectedIndex; files.Items.Clear(); files.Items.AddRange(tables.Select(t => (object)t.Name).ToArray()); if (tables.Count > 0) files.SelectedIndex = Math.Clamp(selected, 0, tables.Count - 1); updating = false; }
     internal bool TryImport()
     {
-        if (working || !valid || tasks > 0) return false;
+        if (working || !valid || tasks > 0 || !FormattingAllowsImport) return false;
         if (merge.Checked && destination.SelectedIndex == (int)ImportDestination.AppendSameSheet) { showMessage(this, "追記と結合は同時に指定できません。", MessageBoxIcon.Warning); return false; }
         working = true; writeCancellation = new(); import.Enabled = false; cancel.Text = "中止";
         var editors = Controls.Cast<Control>().ToArray();
@@ -212,7 +217,7 @@ internal sealed class TabularImportForm : BrandedForm
         finally
         {
             working = false; writeCancellation.Dispose(); writeCancellation = null;
-            if (!IsDisposed) { import.Enabled = valid; cancel.Text = "キャンセル"; destination.Enabled = files.Enabled = header.Enabled = dropEmpty.Enabled = skipFirst.Enabled = skipLast.Enabled = previewMode.Enabled = mergeBy.Enabled = applyToAll.Enabled = settingsViewport.Enabled = true; chooseFiles.Enabled = reselect is not null; encoding.Enabled = reencode is not null; if (targets is not null) targets.Enabled = true; UpdateModes(); }
+            if (!IsDisposed) { import.Enabled = valid && FormattingAllowsImport; cancel.Text = "キャンセル"; destination.Enabled = files.Enabled = header.Enabled = dropEmpty.Enabled = skipFirst.Enabled = skipLast.Enabled = previewMode.Enabled = mergeBy.Enabled = applyToAll.Enabled = settingsViewport.Enabled = true; chooseFiles.Enabled = reselect is not null; encoding.Enabled = reencode is not null; if (targets is not null) targets.Enabled = true; UpdateModes(); }
         }
     }
     void Populate()
@@ -220,11 +225,11 @@ internal sealed class TabularImportForm : BrandedForm
         if (tables.Count == 0 || updating) return;
         preview.RowCount = 0; preview.Columns.Clear(); preview.HorizontalScrollingOffset = 0; settingsScroll.Value = 0;
         var table = tables[SelectedFile];
-        previewCache?.Dispose(); previewCache = usePreviewCache ? new(table, () => { if (!IsDisposed && IsHandleCreated) try { BeginInvoke(() => { if (!IsDisposed) preview.Invalidate(); }); } catch (InvalidOperationException) { } }) : null;
+        previewCache?.Dispose(); previewCache = usePreviewCache && formattedPreview is null ? new(table, () => { if (!IsDisposed && IsHandleCreated) try { BeginInvoke(() => { if (!IsDisposed) preview.Invalidate(); }); } catch (InvalidOperationException) { } }) : null;
         for (int c = 0; c < table.ColumnCount; c++) { string title = selection.Header && c < table.Rows[0].Length ? table.Rows[0][c] : "列" + (c + 1); preview.Columns.Add(new DataGridViewTextBoxColumn { Name = "Data" + c, HeaderText = title, Width = ColumnWidth, SortMode = DataGridViewColumnSortMode.NotSortable }); }
         previewRows = TabularTransform.PreviewRows(table, selection.Header, (PreviewMode)Math.Max(0, previewMode.SelectedIndex)); preview.RowCount = previewRows.Length; preview.Visible = previewMode.SelectedIndex != 0;
         PopulateSettings(); SyncEncoding();
-        if (valid) { status.Text = $"{tables.Count}表 / {tables.Sum(t => t.RowCount - (selection.Header ? 1 : 0))}データ行 / 表示 {previewRows.Length}行" + (table.DetectedEncoding is null ? "" : " / " + table.DetectedEncoding) + (notices.Length == 0 ? "" : " / " + string.Join("　", notices.Take(3))); tips.SetToolTip(status, string.Join(Environment.NewLine, notices)); }
+        if (valid) { basePreviewStatus = $"{tables.Count}表 / {tables.Sum(t => t.RowCount - (selection.Header ? 1 : 0))}データ行 / 表示 {previewRows.Length}行" + (table.DetectedEncoding is null ? "" : " / " + table.DetectedEncoding) + (notices.Length == 0 ? "" : " / " + string.Join("　", notices.Take(3))); status.Text = basePreviewStatus; tips.SetToolTip(status, string.Join(Environment.NewLine, notices)); RefreshFormatting(); }
     }
     void SyncEncoding()
     {
@@ -254,12 +259,15 @@ internal sealed class TabularImportForm : BrandedForm
                 var digitsLabel = new Label { Text = "小数点以下桁数", Left = label.Left, Top = 72, Width = 136, Height = 27 };
                 var digits = new NumericUpDown { Name = "ColumnDecimals" + c, Left = label.Left + 144, Top = 68, Width = 80, Minimum = 0, Maximum = 15, Value = selection.DecimalPlaces[file][c], Enabled = ColumnConversion.IsNumeric(selection.Types[file][c]) };
                 digitsLabel.Enabled = digits.Enabled;
-                type.SelectedIndexChanged += (_, _) => { if (type.SelectedIndex < 0) return; var chosen = (ColumnType)type.SelectedIndex; selection.SetType(file, column, chosen); Remember(file, column, true); digits.Enabled = digitsLabel.Enabled = ColumnConversion.IsNumeric(chosen); digits.Value = selection.DecimalPlaces[file][column]; };
-                digits.ValueChanged += (_, _) => { selection.SetDecimals(file, column, (int)digits.Value); Remember(file, column, false); };
-                tips.SetToolTip(label, title); tips.SetToolTip(digits, "0なら小数点を表示しません。保存する数値は変更しません。"); settings.Controls.AddRange([label, type, digitsLabel, digits]);
+                bool assigningDigits = false;
+                var format = new TextBox { Name = "ColumnFormat" + c, AccessibleName = $"列{c + 1}の書式コード", Left = label.Left + 48, Top = 105, Width = ColumnWidth - 56, ReadOnly = true, Text = ExcelValueFormat.Code(selection.Types[file][c], selection.DecimalPlaces[file][c]) };
+                var formatLabel = new Label { Text = "書式", Left = label.Left, Top = 108, Width = 44, Height = 25 };
+                type.SelectedIndexChanged += (_, _) => { if (type.SelectedIndex < 0) return; var chosen = (ColumnType)type.SelectedIndex; selection.SetType(file, column, chosen); Remember(file, column, true); digits.Enabled = digitsLabel.Enabled = ColumnConversion.IsNumeric(chosen); assigningDigits = true; digits.Value = selection.DecimalPlaces[file][column]; assigningDigits = false; RefreshFormatting(); };
+                digits.ValueChanged += (_, _) => { if (assigningDigits) return; selection.SetDecimals(file, column, (int)digits.Value); Remember(file, column, false); RefreshFormatting(); };
+                tips.SetToolTip(label, title); tips.SetToolTip(digits, "0なら小数点を表示しません。保存する数値は変更しません。"); tips.SetToolTip(format, "Excelへ適用する書式コードです。セルごとの実際の書式と格納値はプレビューのツールチップで確認できます。"); settings.Controls.AddRange([label, type, digitsLabel, digits, formatLabel, format]);
             }
         }
         finally { settings.ResumeLayout(); }
     }
-    protected override void Dispose(bool disposing) { if (disposing) { rebuildCancellation?.Cancel(); previewCache?.Dispose(); tips.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing) { CancelPreviewWork(); rebuildCancellation?.Cancel(); formattedPreview?.Dispose(); previewCache?.Dispose(); tips.Dispose(); } base.Dispose(disposing); }
 }

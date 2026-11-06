@@ -18,6 +18,13 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj
 
 ## 検証
 
+書式付きプレビューの比較は次のCLIで行います。専用の非表示Excelで実書込みとプレビューのText・Value2・NumberFormat・PrefixCharacterを比較し、取り込み先の列幅、書体、1904年日付方式、地域設定も確認します。後者は画面を表示しないコントロール試験で、形式変更・エラー復帰・全件検査・遅延結果の破棄を確認します。GUIの実描画やドラッグ操作の検証とは区別します。
+
+```powershell
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --format-preview-com dev/history/v0.2.2/logs/format-check
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --format-preview-ui dev/history/v0.2.2/logs/format-check
+```
+
 大型プレビュー用サンプルは次のコマンドで作成します。40列と64列、それぞれ見出し＋1500行で、２ファイル合計156104セルです。番号・日付・数値・日本語・改行・引用符・数式風文字列・空欄を含み、既存ファイルは上書きしません。
 
 ```powershell

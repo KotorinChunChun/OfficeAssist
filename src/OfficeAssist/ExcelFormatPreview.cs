@@ -121,9 +121,11 @@ internal sealed class ExcelFormatPreview : IExcelFormatPreview
     public void Dispose()
     {
         if (disposed) return; disposed = true; queue.CompleteAdding();
-        if (!worker.Join(5000) && OwnedPid > 0)
+        worker.Join(5000);
+        // Excelが後からモーダル状態になりQuitを拒否した場合も、所有した専用PIDだけ回収する。
+        if (OwnedPid > 0)
         {
-            try { using var process = Process.GetProcessById(OwnedPid); if (ownedStart != default && process.StartTime == ownedStart && process.ProcessName.Equals("EXCEL", StringComparison.OrdinalIgnoreCase)) process.Kill(); } catch { }
+            try { using var process = Process.GetProcessById(OwnedPid); if (ownedStart != default && process.StartTime == ownedStart && process.ProcessName.Equals("EXCEL", StringComparison.OrdinalIgnoreCase) && !process.WaitForExit(1000)) process.Kill(); } catch { }
         }
     }
 }

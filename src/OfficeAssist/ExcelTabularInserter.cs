@@ -72,7 +72,7 @@ internal static class ExcelTabularInserter
                 if (replacement is null) return null;
                 var next = new InputSelection(changed); foreach (var file in changed) next.Check(file.Path, inputSelection.IsChecked(file.Path));
                 foreach (var table in sources) table.Rows.Dispose(); sources = replacement; inputSelection = next; return replacement;
-            }))
+            }, previewContext: (data, options, file, positions) => ExcelPreviewContext.Capture(window, data, options, file, positions)))
                 return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Result : null;
         }
         finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); foreach (var modalLock in locks.Values.Reverse()) modalLock.Dispose(); }

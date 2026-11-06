@@ -11,6 +11,7 @@ internal sealed class ExcelTargetEditor : FlowLayoutPanel
     readonly List<string> bookIds = new();
     readonly ComScope com;
     readonly object app;
+    internal event Action? Changed;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Action<nint>? TargetWindowChanged { get; set; }
     internal ExcelTargetEditor(ComScope com, dynamic window)
@@ -21,6 +22,7 @@ internal sealed class ExcelTargetEditor : FlowLayoutPanel
         Controls.AddRange([Label("ブック"), books, plannedBook, Label("シート"), sheets, plannedSheet, Label("セル"), address, plannedCell]);
         books.SelectedIndexChanged += (_, _) => { try { LoadSheets(); } catch (Exception ex) { sheets.Items.Clear(); MessageBox.Show(FindForm(), ex.Message, WindowTitle.Create("出力先"), MessageBoxButtons.OK, MessageBoxIcon.Warning); } };
         books.SelectedIndex = bookIds.IndexOf((string)sourceBook.FullName); sheets.SelectedItem = (string)sourceSheet.Name; address.Text = ExcelAddress.Display(selected);
+        books.SelectedIndexChanged += (_, _) => Changed?.Invoke(); sheets.SelectedIndexChanged += (_, _) => Changed?.Invoke(); address.TextChanged += (_, _) => Changed?.Invoke();
     }
     static Label Label(string text) => new() { Text = text, AutoSize = true, Padding = new(0, 5, 0, 0) };
     void LoadSheets()
