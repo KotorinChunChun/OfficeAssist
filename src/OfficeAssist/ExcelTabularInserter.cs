@@ -50,6 +50,7 @@ internal static class ExcelTabularInserter
             var targets = new ExcelTargetEditor(com, window);
             targets.TargetWindowChanged = hwnd => { if (!locks.ContainsKey(hwnd)) locks[hwnd] = new(hwnd); };
             targets.LockCurrentWindows();
+            var previewContext = new ExcelPreviewContextCache(window);
             TabularImportForm? dialog = null;
             using (dialog = new TabularImportForm(sources, options =>
             {
@@ -72,7 +73,7 @@ internal static class ExcelTabularInserter
                 if (replacement is null) return null;
                 var next = new InputSelection(changed); foreach (var file in changed) next.Check(file.Path, inputSelection.IsChecked(file.Path));
                 foreach (var table in sources) table.Rows.Dispose(); sources = replacement; inputSelection = next; return replacement;
-            }, previewContext: (data, options, file, positions) => ExcelPreviewContext.Capture(window, data, options, file, positions)))
+            }, previewContext: previewContext.Capture))
                 return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Result : null;
         }
         finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); foreach (var modalLock in locks.Values.Reverse()) modalLock.Dispose(); }

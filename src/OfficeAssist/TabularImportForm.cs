@@ -141,7 +141,7 @@ internal sealed partial class TabularImportForm : BrandedForm
         Control[] controls = [top, rows, modeBar, fileBar, settingsViewport, preview, status, buttons]; for (int i = 0; i < controls.Length; i++) layout.Controls.Add(controls[i], 0, i); Controls.Add(layout);
         FormClosing += (_, e) => { if (working || tasks > 0) { CancelPreviewWork(); writeCancellation?.Cancel(); rebuildCancellation?.Cancel(); pendingClose = true; e.Cancel = true; } };
         Shown += async (_, _) => { BringToFront(); Activate(); if (defer) await Rebuild(autoHeader: true); };
-        InitializeFormatting(formatPreview ?? (defer ? new ExcelFormatPreview() : null), previewContext);
+        InitializeFormatting(formatPreview ?? (defer ? SharedExcelFormatPreview.Acquire() : null), previewContext);
         PopulateFiles(); UpdateModes(); Populate(); if (defer) { valid = false; import.Enabled = false; }
     }
     static Label LabelFor(string text) => new() { Text = text, AutoSize = true, Padding = new(0, 5, 0, 0) };

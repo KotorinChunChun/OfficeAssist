@@ -37,6 +37,18 @@ internal static partial class Program
                         types[c] + ": プレビューの表示・格納値・書式・引用符が実書込みと一致");
                 }
                 Check(results[0].FormatCode == "0" && results[1].FormatCode == "0.00" && results[5].FormatCode == "yyyy/mm/dd", "適用するExcel書式コードを返す");
+                sheet.Range["A41"].Font.Bold = true; sheet.Range["B42"].Font.Size = 22; sheet.Range["B42"].RowHeight = 30;
+                var styleData = new TabularData("styles.csv", [["数値1", "数値2"], ["1", "2"], ["3", "4"]]);
+                IReadOnlyList<TabularData> styleTables = new[] { styleData };
+                var styleOptions = TabularImportOptions.Infer(styleTables, header: true) with { CellAddress = "A40" };
+                var styleCache = new ExcelPreviewContextCache((object)window);
+                var stylePositions = new[] { (Row: 1, Column: 0), (Row: 2, Column: 1) };
+                var mixed = styleCache.Capture(styleTables, styleOptions, 0, stylePositions);
+                Check(mixed.Styles[0].Bold && mixed.Styles[1].FontSize == 22 && mixed.Styles[1].RowHeight == 30, "範囲内の属性が混在した場合は個別値を正しく取得する");
+                var reused = styleCache.Capture(styleTables, styleOptions with { DecimalPlaces = [[2, 2]] }, 0, stylePositions);
+                Check(ReferenceEquals(mixed.Styles[0], reused.Styles[0]), "小数桁だけの変更は同じ出力属性を再取得しない");
+                var changedTarget = styleCache.Capture(styleTables, styleOptions with { CellAddress = "D40" }, 0, stylePositions);
+                Check(!changedTarget.Styles[0].Bold && changedTarget.Styles[1].FontSize != 22, "指定セル変更では属性キャッシュを破棄する");
                 sheet.Range["A:A"].ColumnWidth = 2;
                 ExcelPreviewSnapshot narrow = ExcelPreviewContext.Capture(window, new[] { data }, options, 0, new[] { (Row: 1, Column: 0) });
                 var clipped = renderer.RenderAsync([new(1, 0, values[0], types[0], decimals[0], narrow.Styles[0])], narrow.Environment, default).GetAwaiter().GetResult()[0];

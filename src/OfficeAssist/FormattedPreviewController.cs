@@ -5,7 +5,7 @@ internal sealed class FormattedPreviewController : IDisposable
     readonly Control owner;
     readonly IExcelFormatPreview renderer;
     readonly Action changed;
-    readonly System.Windows.Forms.Timer timer = new() { Interval = 100 };
+    readonly System.Windows.Forms.Timer timer = new() { Interval = 16 };
     readonly Dictionary<(int Row, int Column), ExcelPreviewCell> cache = new();
     readonly Queue<(int Row, int Column)> order = new();
     readonly HashSet<(int Row, int Column)> pending = new();
@@ -15,6 +15,7 @@ internal sealed class FormattedPreviewController : IDisposable
     CancellationTokenSource cancellation = new();
     int generation; bool inFlight, active, disposed;
     long characters;
+    int notificationQueued;
     internal bool Busy => active && (inFlight || pending.Count > 0);
     internal string? Failure { get; private set; }
     internal int WarningCount => cache.Values.Count(c => c.Warning is not null);
@@ -41,7 +42,9 @@ internal sealed class FormattedPreviewController : IDisposable
     void Notify()
     {
         if (!owner.IsHandleCreated || owner.IsDisposed || disposed) return;
-        try { owner.BeginInvoke(() => { if (!disposed && !owner.IsDisposed) changed(); }); } catch (InvalidOperationException) { }
+        if (Interlocked.Exchange(ref notificationQueued, 1) != 0) return;
+        try { owner.BeginInvoke(async () => { Interlocked.Exchange(ref notificationQueued, 0); if (!disposed && !owner.IsDisposed) { changed(); await Flush(); } }); }
+        catch (InvalidOperationException) { Interlocked.Exchange(ref notificationQueued, 0); }
     }
     async Task Flush()
     {

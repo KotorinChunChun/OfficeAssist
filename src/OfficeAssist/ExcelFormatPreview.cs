@@ -9,10 +9,13 @@ internal sealed class ExcelFormatPreview : IExcelFormatPreview
     sealed record Request(IReadOnlyList<ExcelPreviewInput> Cells, ExcelPreviewEnvironment Environment, CancellationToken Token, TaskCompletionSource<IReadOnlyList<ExcelPreviewCell>> Completion);
     readonly BlockingCollection<Request> queue = new(4);
     readonly Thread worker;
+    readonly bool cacheResults, batchStyles, literalText;
     bool disposed;
     internal int OwnedPid { get; private set; }
-    internal ExcelFormatPreview()
+    internal ExcelPreviewMetrics LastMetrics { get; private set; } = new(0, 0, 0, 0, 0, 0);
+    internal ExcelFormatPreview(bool cacheResults = true, bool batchStyles = true, bool literalText = true)
     {
+        this.cacheResults = cacheResults; this.batchStyles = batchStyles; this.literalText = literalText;
         worker = new Thread(Run) { IsBackground = true, Name = "OfficeAssist.ExcelFormatPreview" };
         worker.SetApartmentState(ApartmentState.STA); worker.Start();
     }
@@ -30,6 +33,7 @@ internal sealed class ExcelFormatPreview : IExcelFormatPreview
         bool owned = false; DateTime started = default;
         bool oldSystemSeparators = true; string oldDecimal = ".", oldThousands = ",";
         string defaultFont = ""; double defaultFontSize = 11;
+        ExcelPreviewSession? session = null;
         using var lifetime = new ComScope();
         try
         {
@@ -38,6 +42,12 @@ internal sealed class ExcelFormatPreview : IExcelFormatPreview
                 if (request.Token.IsCancellationRequested) { request.Completion.TrySetCanceled(request.Token); continue; }
                 try
                 {
+                    if (literalText)
+                    {
+                        var literals = new List<ExcelPreviewCell>();
+                        foreach (var input in request.Cells) { if (!ExcelPreviewSession.TryLiteral(input, out var cell)) break; literals.Add(cell); }
+                        if (literals.Count == request.Cells.Count) { LastMetrics = new(literals.Count, 0, literals.Count, 0, 0, 0); request.Completion.TrySetResult(literals); continue; }
+                    }
                     if (application is null)
                     {
                         var existing = Process.GetProcessesByName("EXCEL").Select(p => { using (p) return p.Id; }).ToHashSet();
@@ -51,8 +61,11 @@ internal sealed class ExcelFormatPreview : IExcelFormatPreview
                         dynamic books = lifetime.Own(app.Workbooks); workbook = lifetime.Own(books.Add(-4167));
                         dynamic styles = lifetime.Own(((dynamic)workbook).Styles), normal = lifetime.Own(styles.Item("Normal")), font = lifetime.Own(normal.Font);
                         defaultFont = (string)font.Name; defaultFontSize = (double)font.Size;
+                        app.ScreenUpdating = false; app.Calculation = -4135;
+                        session = new(application, workbook, defaultFont, defaultFontSize, cacheResults, batchStyles, literalText);
                     }
-                    request.Completion.TrySetResult(Render(application, workbook!, request, defaultFont, defaultFontSize));
+                    var rendered = session!.Render(request.Cells, request.Environment, request.Token); LastMetrics = session.Metrics;
+                    request.Completion.TrySetResult(rendered);
                 }
                 catch (OperationCanceledException) { request.Completion.TrySetCanceled(request.Token); }
                 catch (Exception ex) { request.Completion.TrySetException(ex); }
@@ -69,55 +82,6 @@ internal sealed class ExcelFormatPreview : IExcelFormatPreview
         }
     }
     DateTime ownedStart;
-    static IReadOnlyList<ExcelPreviewCell> Render(dynamic app, dynamic book, Request request, string defaultFont, double defaultFontSize)
-    {
-        using var com = new ComScope();
-        var environment = request.Environment;
-        app.UseSystemSeparators = environment.UseSystemSeparators;
-        if (!environment.UseSystemSeparators) { app.DecimalSeparator = environment.DecimalSeparator; app.ThousandsSeparator = environment.ThousandsSeparator; }
-        book.Date1904 = environment.Date1904;
-        dynamic styles = com.Own(book.Styles), normal = com.Own(styles.Item("Normal")), normalFont = com.Own(normal.Font);
-        normalFont.Name = environment.NormalFont ?? defaultFont;
-        normalFont.Size = environment.NormalFontSize ?? defaultFontSize;
-        dynamic sheets = com.Own(book.Worksheets), sheet = com.Own(sheets.Item(1)), cell = com.Own(sheet.Range["A1"]), column = com.Own(cell.EntireColumn);
-        var widths = new Dictionary<double, double>(); var results = new List<ExcelPreviewCell>();
-        double standardWidth = (double)sheet.StandardWidth;
-        foreach (var input in request.Cells)
-        {
-            request.Token.ThrowIfCancellationRequested();
-            string code = ExcelValueFormat.Code(input.Type, input.Decimals);
-            try
-            {
-                object? value = ExcelValueFormat.Value(input.Raw, input.Type, false, environment.Date1904);
-                cell.Clear(); var style = input.Style ?? new();
-                dynamic font = com.Own(cell.Font);
-                font.Name = style.FontName ?? (string)normalFont.Name; font.Size = style.FontSize ?? (double)normalFont.Size;
-                font.Bold = style.Bold; font.Italic = style.Italic; cell.WrapText = style.Wrap; cell.ShrinkToFit = style.Shrink;
-                cell.RowHeight = style.RowHeight ?? (double)sheet.StandardHeight;
-                if (style.WidthPoints.HasValue)
-                {
-                    double points = style.WidthPoints.Value;
-                    if (!widths.TryGetValue(points, out double characters))
-                    {
-                        double low = 0, high = 255; characters = 0;
-                        for (int i = 0; i < 16; i++) { characters = (low + high) / 2; column.ColumnWidth = characters; double actual = (double)column.Width; if (Math.Abs(actual - points) < 0.2) break; if (actual < points) low = characters; else high = characters; }
-                        widths[points] = (double)column.ColumnWidth;
-                    }
-                    column.ColumnWidth = widths[points];
-                }
-                else column.ColumnWidth = style.WidthCharacters ?? standardWidth;
-                ExcelValueFormat.Apply(app, cell, ExcelValueFormat.CellCode(input.Type, input.Decimals, value));
-                cell.Value2 = value;
-                if (cell.HasFormula is not bool formula || formula) throw new InvalidOperationException("プレビューに意図しない数式があります。");
-                string display = (string)cell.Text;
-                string? warning = display.Length > 0 && display.All(ch => ch == '#') ? "Excelではこの列幅・値・書式の組合せが#表示になります。列幅、負の時刻などを確認してください。" : null;
-                results.Add(new(input.Row, input.Column, input.Raw, display, (object?)cell.Value2, code, (string)cell.NumberFormat, (string)cell.PrefixCharacter, Warning: warning));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            { results.Add(new(input.Row, input.Column, input.Raw, "変換エラー", null, code, code, "", ex.Message)); }
-        }
-        return results;
-    }
     public void Dispose()
     {
         if (disposed) return; disposed = true; queue.CompleteAdding();

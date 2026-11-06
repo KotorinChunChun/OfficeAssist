@@ -14,6 +14,10 @@ internal sealed partial class TabularImportForm
     string? validationFailure;
     bool validating;
     int validationGeneration;
+    IReadOnlyList<TabularData>? validatedData;
+    ColumnType[][]? validatedTypes;
+    bool validatedHeader;
+    ImportPreviewValidation? previousValidation;
     bool FormattingAllowsImport => formattedPreview is null || (!validating && validationResult is not null && validationResult.ErrorCount == 0
         && validationFailure is null && formattedPreview.Failure is null && !formattedPreview.Busy);
     internal bool IsFormattingReady => valid && FormattingAllowsImport;
@@ -51,6 +55,9 @@ internal sealed partial class TabularImportForm
         if (previewMode.SelectedIndex != 0)
             formattedPreview.Reset(data[file], options.Types[file], Enumerable.Range(0, data[file].ColumnCount).Select(c => options.Decimals(file, c)).ToArray(),
                 positions => capturePreview?.Invoke(data, options, file, positions) ?? new(new(), positions.Select(_ => new ExcelPreviewStyle()).ToArray()));
+        if (ReferenceEquals(validatedData, data) && validatedHeader == options.Header && validatedTypes is not null
+            && validatedTypes.Length == options.Types.Length && validatedTypes.Zip(options.Types).All(p => p.First.SequenceEqual(p.Second)))
+        { validationResult = previousValidation; preview.Invalidate(); UpdateFormattingState(); return; }
         int revision = ++validationGeneration; var cancellation = new CancellationTokenSource(); validationCancellation = cancellation;
         validating = true; tasks++;
         validationWork = ValidatePreview(data, options, revision, cancellation);
@@ -61,9 +68,10 @@ internal sealed partial class TabularImportForm
     {
         try
         {
-            await Task.Delay(150, cancellation.Token);
+            await Task.Delay(25, cancellation.Token);
             var result = await Task.Run(() => ImportPreviewValidation.Check(data, options, cancellation.Token), cancellation.Token);
-            if (revision == validationGeneration && !IsDisposed) validationResult = result;
+            if (revision == validationGeneration && !IsDisposed)
+            { validationResult = previousValidation = result; validatedData = data; validatedTypes = options.Types.Select(t => t.ToArray()).ToArray(); validatedHeader = options.Header; }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (revision == validationGeneration && !IsDisposed) validationFailure = ex.Message; }

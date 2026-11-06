@@ -12,9 +12,10 @@ internal static partial class Program
     {
         var results = new List<PreviewTiming>();
         string report = Path.Combine(output, "benchmark.json");
+        string assemblyHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(ExcelFormatPreview).Assembly.Location)));
         if (File.Exists(report)) throw new IOException("測定結果は既存ファイルへ上書きしません。");
         void Save() => File.WriteAllText(report, JsonSerializer.Serialize(new { schemaVersion = 1, syntheticData = true, repeats,
-            runtime = Environment.Version.ToString(), os = Environment.OSVersion.ToString(), processors = Environment.ProcessorCount,
+            runtime = Environment.Version.ToString(), os = Environment.OSVersion.ToString(), processors = Environment.ProcessorCount, assemblySha256 = assemblyHash,
             source = typeof(ExcelFormatPreview).Assembly.GetCustomAttributes(false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion,
             results }, new JsonSerializerOptions { WriteIndented = true }));
         void Measure(string name, string features, int rows, int columns, Func<string> run, int? count = null)
@@ -64,6 +65,13 @@ internal static partial class Program
             Measure("excel/" + item.Item1, item.Item4 ? "書式ON・対象属性ON" : "書式ON・対象属性OFF", item.Item2, 8,
                 () => PreviewDigest(renderer.RenderAsync(inputs, new(), default).GetAwaiter().GetResult()));
         }
+        foreach (var feature in new[] { ("no-cache", false, true, true), ("no-cache-no-batch", false, false, true), ("no-cache-no-literal", false, true, false) })
+        {
+            using var isolated = new ExcelFormatPreview(cacheResults: feature.Item2, batchStyles: feature.Item3, literalText: feature.Item4);
+            isolated.RenderAsync([new(0, 0, "42", ColumnType.Number, 0)], new(), default).GetAwaiter().GetResult();
+            var data = BenchmarkInputs(10, true, false, false);
+            Measure("features/" + feature.Item1, "初回起動を除く・固有値80セル", 10, 8, () => PreviewDigest(isolated.RenderAsync(data, new(), default).GetAwaiter().GetResult()));
+        }
         var existing = Process.GetProcessesByName("EXCEL").Select(p => { using (p) return p.Id; }).ToHashSet();
         using var com = new ComScope(); dynamic app = com.Own(Activator.CreateInstance(Type.GetTypeFromProgID("Excel.Application")!)!);
         Native.GetWindowThreadProcessId((nint)(int)app.Hwnd, out uint pid);
@@ -85,7 +93,7 @@ internal static partial class Program
                     Measure("form/" + (formatted ? "formatted" : "raw"), "初回表示・GUIは非表示", 10, 8, () =>
                     {
                         form?.Dispose(); form = new([data], formatPreview: formatted ? new BorrowedPreview(renderer) : null,
-                            previewContext: (tables, o, f, p) => ExcelPreviewContext.Capture(window, tables, options with { Types = o.Types, DecimalPlaces = o.DecimalPlaces }, f, p));
+                            previewContext: new ExcelPreviewContextCache((object)window).Capture);
                         _ = form.Handle; grid = (DataGridView)form.Controls.Find("ImportDataPreview", true).Single(); _ = grid.Handle;
                         return BenchmarkFormDisplay(form, grid);
                     });

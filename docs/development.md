@@ -18,6 +18,20 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj
 
 ## 検証
 
+### プレビューの性能測定
+
+`--preview-benchmark`は合成データだけを使い、機能別に3回測定して`benchmark.json`へ全試行・中央値・割当量・処理結果SHA-256・実行環境・測定DLLのSHA-256を記録します。保存先は毎回未使用のフォルダーを指定してください。`--quick`は動作確認用の1回測定で、性能判断には使いません。
+
+```powershell
+cd C:\develop\KotorinToys\tools\OfficeAssist
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --preview-benchmark dev/history/v0.2.2/logs/preview-benchmark/run-a
+./dev/scripts/Compare-PreviewBenchmarks.ps1 -Before dev/history/v0.2.2/logs/preview-benchmark/run-a/benchmark.json -After dev/history/v0.2.2/logs/preview-benchmark/run-b/benchmark.json -OutputDirectory dev/history/v0.2.2/logs/preview-benchmark/comparison
+```
+
+改修前後を同じ環境で別々に保存して比較します。元データのみ／書式あり、対象属性なし／あり、検査、推定、行加工・結合、表示行の選択、文字コード自動／手動、繰返し／固有値、日付／不正日付、長文、縦長／横長、初回／小数桁変更を含みます。`features/`は結果キャッシュ・範囲設定・短文文字列経路を無効化する切り分けです。比較スクリプトは共通ケースの条件と結果が違えば失敗します。
+
+書式の測定は結果文字列の構築を含みます。`excel/cold-start`だけは専用Excelの起動込み、`form/`は専用Excel起動後の非表示コントロールの構築と表示完了までです。表示結果の再利用が効く反復の中央値と、未登録の値を含む最初の試行を分けて評価してください。`--preview-final-check --selection-com --large-preview`は性能対策の一致・上限・終了処理と既存機能をまとめてCLI確認します。先に大型サンプルを同じ出力先の`files/`へ生成します。GUIの実描画・操作の受入確認は別です。
+
 書式付きプレビューの比較は次のCLIで行います。専用の非表示Excelで実書込みとプレビューのText・Value2・NumberFormat・PrefixCharacterを比較し、取り込み先の列幅、書体、1904年日付方式、地域設定も確認します。後者は画面を表示しないコントロール試験で、形式変更・エラー復帰・全件検査・遅延結果の破棄を確認します。GUIの実描画やドラッグ操作の検証とは区別します。
 
 ```powershell

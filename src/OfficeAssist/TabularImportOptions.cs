@@ -68,12 +68,15 @@ internal static class ColumnConversion
             bool valid = type == ColumnType.Percent ? TryPercent(value, out number) : type == ColumnType.Yen ? TryYen(value, out number) : TryNumber(value, out number);
             if (!valid) continue;
             if (type == ColumnType.Percent) number *= 100;
-            if (!double.IsFinite(number)) continue;
-            string text = number.ToString("0.###############", CultureInfo.InvariantCulture);
-            int point = text.IndexOf('.');
-            if (point >= 0) places = Math.Max(places, text.Length - point - 1);
+            places = Math.Max(places, CountDecimals(number));
         }
         return Math.Min(places, 15);
+    }
+    internal static int CountDecimals(double number)
+    {
+        if (!double.IsFinite(number)) return 0;
+        string text = number.ToString("0.###############", CultureInfo.InvariantCulture); int point = text.IndexOf('.');
+        return point < 0 ? 0 : Math.Min(text.Length - point - 1, 15);
     }
     internal static bool PreserveAsText(string value)
     {
@@ -105,27 +108,35 @@ internal static class ColumnConversion
     }
     internal static object? Convert(string value, ColumnType type, bool header)
     {
-        if (value.Length == 0) return null;
+        if (TryConvert(value, type, header, out var result)) return result;
+        throw new InvalidDataException($"{Labels[(int)type]}へ変換できない値があります。");
+    }
+    // 検査で不正値ごとに例外を生成しない。実書込みもこの判定を通る。
+    internal static bool TryConvert(string value, ColumnType type, bool header, out object? result, bool materialize = true)
+    {
+        result = null;
+        if (value.Length == 0) return true;
         // 元データ自身が引用符で始まる場合だけ、Excelの制御文字解釈をエスケープする。
-        if (header || type == ColumnType.TextFormat) return value.StartsWith('\'') ? "'" + value : value;
-        if (type == ColumnType.TextQuote) return "'" + value;
-        if (IsDate(type) && TryDate(value, out var date)) return date.ToOADate();
+        if (header || type == ColumnType.TextFormat) { if (materialize) result = value.StartsWith('\'') ? "'" + value : value; return true; }
+        if (type == ColumnType.TextQuote) { if (materialize) result = "'" + value; return true; }
+        if (IsDate(type) && TryDate(value, out var date)) { if (materialize) result = date.ToOADate(); return true; }
         if (type == ColumnType.Time)
         {
-            if (TryDuration(value, out var time) && time >= 0 && time < 1) return time;
-            if (TryDate(value, out date)) return date.ToOADate();
+            if (TryDuration(value, out var time) && time >= 0 && time < 1) { if (materialize) result = time; return true; }
+            if (TryDate(value, out date)) { if (materialize) result = date.ToOADate(); return true; }
         }
-        if (type == ColumnType.Duration && TryDuration(value, out var duration)) return duration;
-        if (type is ColumnType.Number or ColumnType.GroupedNumber && TryNumber(value, out var number)) return number;
-        if (type == ColumnType.Percent && TryPercent(value, out var percent)) return percent;
-        if (type == ColumnType.Yen && TryYen(value, out var yen)) return yen;
+        if (type == ColumnType.Duration && TryDuration(value, out var duration)) { if (materialize) result = duration; return true; }
+        if (type is ColumnType.Number or ColumnType.GroupedNumber && TryNumber(value, out var number)) { if (materialize) result = number; return true; }
+        if (type == ColumnType.Percent && TryPercent(value, out var percent)) { if (materialize) result = percent; return true; }
+        if (type == ColumnType.Yen && TryYen(value, out var yen)) { if (materialize) result = yen; return true; }
         if (type == ColumnType.General)
         {
-            if (TryDate(value, out date)) return date.ToOADate();
-            if (!PreserveAsText(value) && TryNumber(value, out number)) return number;
-            return value.StartsWith('\'') ? "'" + value : value;
+            if (!materialize) return true;
+            if (TryDate(value, out date)) { result = date.ToOADate(); return true; }
+            if (!PreserveAsText(value) && TryNumber(value, out number)) { result = number; return true; }
+            result = value.StartsWith('\'') ? "'" + value : value; return true;
         }
-        throw new InvalidDataException($"{Labels[(int)type]}へ変換できない値があります。");
+        return false;
     }
     internal static string Format(ColumnType type, int decimals = 0)
     {
