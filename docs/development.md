@@ -96,3 +96,8 @@ dotnet artifacts/external-drop-pr/bin/OfficeAssist.Tests/release/OfficeAssist.Te
 ```powershell
 ./dev/scripts/test-management.ps1 -Executable ./artifacts/management/bin/OfficeAssist/debug/OfficeAssist.exe -StartForTest
 ```
+
+
+## README用の安全な画面プレビュー
+
+`OfficeAssist.Tests.exe --manual-preview <main|settings|image|table> <専用出力先>` で実フォームを表示する。利用者設定・常駐サービス・実Excelへ接続せず、保存・挿入の確定も製品設定やブックへ書き込まない。画像や表の結果は別途CLIの専用ブックで確認する。テストEXE専用の入口であり、配布EXEの操作ではない。
