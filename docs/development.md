@@ -84,6 +84,31 @@ dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -- --exc
 
 `--excel`は新しいExcelプロセスで専用ブックを作り、試験後に保存・終了します。既存ExcelのPIDと一致したら中止します。GUI試験用の`--fixture`は専用Excelを最大25分間開き、出力先へ`stop-fixture`ファイルを作成すると試験ブックを保存して終了します。毎回新しい出力先を指定してください。
 
+### サンプル画像の挿入・保存をCLIで検証する
+
+`--excel --picture-case`は指定した試験用`.xlsx`を複製し、指定画像を埋め込みます。専用の非表示Excelで動作し、セル番地から通常の画像配置処理を呼び出します。次の例では、ケースJSONと同じフォルダーに試験ブックと画像を置きます。絶対パスも指定できます。
+
+```json
+{
+  "Workbook": "取り込み結果.xlsx",
+  "Sheet": "売上サンプル",
+  "Images": ["01-blue.png", "02-orange.png"],
+  "Destination": "selection-range",
+  "Selection": "E2:H9,J2:M9"
+}
+```
+
+`Destination`は `drop`（ドロップ位置に原寸）、`selection-position`（選択範囲の左上に原寸）、`selection-range`（選択範囲にフィット）から選びます。`drop`では `"DropCell": "E2"` のように1セルを追加指定します。`Selection`は実行時の選択を表し、複数範囲はカンマで区切ります。
+
+```powershell
+cd C:\develop\KotorinToys\tools\OfficeAssist
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --excel --picture-case C:\path\picture-case.json dev/history/v0.2.2/logs/picture-case-01
+```
+
+出力先には `picture-result.xlsx` と `picture-report.json` が作られます。JSONには画像ごとの期待値と実測値（左・上・幅・高さ、単位はポイント）、警告、複製元と結果のSHA-256を記録します。画像配置と埋め込みを照合し、保存後に開き直して図形の保持と複製元のハッシュを確認できた場合に `verified: true` を返します。出力名が使用済みの場合は別のフォルダーを指定してください。
+
+エクスプローラーからの実ドラッグ、修飾キー、ダイアログの表示は、`--fixture`を使うGUI受入項目として別に確認します。
+
 通常試験には、Explorer以外の外部起点、Excel内操作とOfficeAssist自身の除外、Copy可能な画像FileDropの判定、非画像と送信元読取例外の回帰も含みます。実入力・クリップボード・既存Excelは操作しません。PR用に出力を分ける例:
 
 ```powershell

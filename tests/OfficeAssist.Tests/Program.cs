@@ -28,6 +28,7 @@ internal static partial class Program
         Directory.CreateDirectory(output);
         try
         {
+            if (args.Contains("--picture-case")) return VerifyPictureCase(args, output);
             if (args.Contains("--manual-preview")) return ManualPreview(args, output);
             if (args.Contains("--create-import-cases")) { var cases = ImportFixtureSet.Create(output); Console.WriteLine($"生成: {cases.Length}ケース → {output}"); return 0; }
             if (args.Contains("--format-preview-com")) { FormattedPreviewExcelTests(); Console.WriteLine($"PASS: {count}件"); return 0; }

@@ -37,10 +37,7 @@ internal static class ExcelPictureInserter
         Marshal.ThrowExceptionForHR(hr);
         dynamic window = com.Own(nativeWindow);
         dynamic sheet = com.Own(window.ActiveSheet);
-        if ((int)sheet.Type != -4167) throw new InvalidOperationException("ワークシートのセルへドロップしてください。");
-        dynamic book = com.Own(sheet.Parent);
-        if ((bool)book.ReadOnly || (bool)sheet.ProtectContents || (bool)sheet.ProtectDrawingObjects)
-            throw new InvalidOperationException("読み取り専用ブックや保護されたシートには挿入できません。");
+        ValidateTarget(com, sheet);
         object? hitObject = window.RangeFromPoint(screenPoint.X, screenPoint.Y);
         if (hitObject is null) throw new InvalidOperationException("シートのセルへドロップしてください。");
         dynamic hit = com.Own(hitObject);
@@ -55,7 +52,6 @@ internal static class ExcelPictureInserter
             throw new InvalidOperationException("行列の見出しではなく、1つのセルへドロップしてください。");
         string sheetName = (string)sheet.Name;
         dynamic selected = com.Own(window.RangeSelection);
-        dynamic areas = com.Own(selected.Areas);
         string selectedAddress = (string)selected.Address;
         InsertOptions options;
         if (interactive)
@@ -74,10 +70,19 @@ internal static class ExcelPictureInserter
             dynamic currentSelection = com.Own(window.RangeSelection);
             if ((string)currentSheet.Name != sheetName || (string)currentSelection.Address != selectedAddress)
                 throw new InvalidOperationException("確認中にシートまたは選択範囲が変わりました。もう一度ドロップしてください。");
-            if ((bool)book.ReadOnly || (bool)sheet.ProtectContents || (bool)sheet.ProtectDrawingObjects)
-                throw new InvalidOperationException("読み取り専用ブックや保護されたシートには挿入できません。");
         }
         else options = new InsertOptions(Destination.DropPosition, PictureKind.Embedded, []);
+        return InsertResolved(com, window, sheet, anchor, selected, files, options, linkedFiles, allowLinkedImages, limitSize: !interactive);
+    }
+
+    // 画面座標の解決と、解決済みセルへの画像配置を分離する。
+    internal static Result InsertResolved(ComScope com, dynamic window, dynamic sheet, object anchor, dynamic selected,
+        IReadOnlyList<string> files, InsertOptions options, IReadOnlyList<string>? linkedFiles = null,
+        bool allowLinkedImages = true, bool limitSize = false)
+    {
+        ValidateTarget(com, sheet);
+        string sheetName = (string)sheet.Name;
+        dynamic areas = com.Own(selected.Areas);
         if (options.Kind == PictureKind.ImageFormula && options.Urls.Length != files.Count)
             throw new InvalidOperationException($"IMAGE関数には画像URLが必要です。{InsertSettings.LoadModifier()}を押しながらドロップし、URLを指定してください。");
         var destinations = new List<object>();
@@ -118,7 +123,7 @@ internal static class ExcelPictureInserter
                     options.Kind == PictureKind.Linked ? 0 : -1, left, top, -1, -1));
                 added.Add(picture);
                 float width = (float)picture.Width, height = (float)picture.Height;
-                float ratio = interactive ? 1 : Math.Min(1, 480 / Math.Max(width, height));
+                float ratio = limitSize ? Math.Min(1, 480 / Math.Max(width, height)) : 1;
                 if (options.Destination == Destination.SelectionRange)
                     ratio = Math.Min((float)destination.Width / width, ((float)destination.Height / countInArea) / height);
                 if (!float.IsFinite(ratio) || ratio <= 0) throw new InvalidOperationException("選択範囲のサイズが不正です。");
@@ -142,6 +147,14 @@ internal static class ExcelPictureInserter
         }
         message = $"{assignments.Count}枚を挿入しました（{sheetName} {address}）。";
         return Finish(com, window, sheet, selected, destinations, assignments, options, message, warnings);
+    }
+
+    static void ValidateTarget(ComScope com, dynamic sheet)
+    {
+        if ((int)sheet.Type != -4167) throw new InvalidOperationException("ワークシートのセルへドロップしてください。");
+        dynamic book = com.Own(sheet.Parent);
+        if ((bool)book.ReadOnly || (bool)sheet.ProtectContents || (bool)sheet.ProtectDrawingObjects)
+            throw new InvalidOperationException("読み取り専用ブックや保護されたシートには挿入できません。");
     }
 
     static Result Finish(ComScope com, dynamic window, dynamic sheet, dynamic selected, List<object> destinations,
