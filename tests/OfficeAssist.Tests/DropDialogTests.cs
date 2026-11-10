@@ -39,8 +39,9 @@ internal static partial class Program
             Check(JsonSerializer.Serialize(dialog.Options!.Types) == JsonSerializer.Serialize(automatic.Options.Types)
                 && JsonSerializer.Serialize(dialog.Options.DecimalPlaces) == JsonSerializer.Serialize(automatic.Options.DecimalPlaces)
                 && dialog.Tables[0].Rows.SelectMany(r => r).SequenceEqual(automatic.Tables[0].Rows.SelectMany(r => r)), "画面の有無で取り込む値・型・小数桁が一致する");
-            var exported = dialog.CreateDropProfile(TableEncoding.Cp932);
-            Check(exported.Rows == profile.Rows && exported.Columns![0].Types[1] == ColumnType.Number && exported.Columns[0].Decimals[1] == 0, "確定画面から次回の既定を取得できる");
+            var exported = dialog.CreateDropProfile();
+            Check(exported.Rows == profile.Rows && exported.Columns![0].Types[1] == ColumnType.Number && exported.Columns[0].Decimals[1] == 0
+                && exported.Encoding == TableEncoding.Auto, "手動文字コードを除いて確定画面の設定を次回へ引き継ぐ");
         }
         var renamed = loaded.Prepare([source with { Name = "next.csv" }]);
         Check(renamed.Options.Decimals(0, 1) == 0, "ファイル名が違っても同じ列構成なら明示設定を再利用する");

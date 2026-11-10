@@ -4,18 +4,24 @@ namespace OfficeAssist;
 
 internal static class ExcelTabularInserter
 {
-    internal static ExcelPictureInserter.Result? Insert(nint handle, Point point, ReceivedTabularBatch received, bool showOptions = true)
+    internal static ExcelPictureInserter.Result? Insert(nint root, (nint Handle, Rectangle Bounds) sheet,
+        Point point, ReceivedTabularBatch received, bool showOptions = true)
     {
-        if (!Native.IsWindow(handle) || Native.ClassName(handle) != "EXCEL7" || !Native.IsWindowEnabled(Native.GetAncestor(handle, 2)))
+        if (!Native.IsUsableExcelRoot(root))
             throw new InvalidOperationException("対象のExcelが閉じられたか、ダイアログを表示しています。");
+        nint handle = sheet.Handle;
+        if (handle == 0)
+        {
+            Native.GetWindowThreadProcessId(root, out uint pid);
+            handle = ExcelConnection.Windows().FirstOrDefault(candidate => candidate.Pid == pid).Handle;
+        }
+        if (handle == 0) throw new InvalidOperationException("対象のExcelに接続できません。ブックを開いてから再度ドロップしてください。");
         using var com = new ComScope(); dynamic window = ExcelConnection.Attach(com, handle), app = com.Own(window.Application);
-        object? hit = window.RangeFromPoint(point.X, point.Y);
-        if (hit is null) throw new InvalidOperationException("ワークシートのセルへドロップしてください。");
-        com.Own(hit);
-        var defaults = TabularDropSettings.Load();
-        try { dynamic cell = hit, rows = com.Own(cell.Rows), columns = com.Own(cell.Columns); if ((int)rows.Count != 1 || (int)columns.Count != 1) throw new InvalidOperationException("見出しではなくセルへドロップしてください。"); }
-        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { throw new InvalidOperationException("ワークシートのセルへドロップしてください。"); }
-        var owner = new ExcelWindowOwner(Native.GetAncestor(handle, 2));
+        var zone = ExcelTableDropSite.Locate(point, sheet.Handle, sheet.Bounds);
+        var destination = ExcelTableDropSite.PreferredDestination(zone, zone == ExcelTableDropZone.Grid && IsCell(com, (object)window, point));
+        var saved = TabularDropSettings.Load();
+        var defaults = saved.ForNewDrop(destination);
+        var owner = new ExcelWindowOwner(root);
         using var locks = new ExcelDropLocks();
         locks.LockExisting(owner.Handle);
         IReadOnlyList<TabularData>? sources = null;
@@ -79,7 +85,12 @@ internal static class ExcelTabularInserter
                 }
             }
             var targets = new ExcelTargetEditor(com, window);
-            targets.TargetWindowChanged = locks.LockExisting;
+            Native.GetWindowThreadProcessId(root, out uint sourcePid);
+            targets.TargetWindowChanged = target =>
+            {
+                if (Native.IsUsableExcelRoot(target) && Native.GetWindowThreadProcessId(target, out uint pid) != 0 && pid == sourcePid)
+                    locks.LockExisting(target);
+            };
             targets.LockCurrentWindows();
             var previewContext = new ExcelPreviewContextCache(window);
             TabularImportOptions optionsToWrite;
@@ -89,7 +100,7 @@ internal static class ExcelTabularInserter
             TabularImportForm? dialog = null;
             using (dialog = new TabularImportForm(sources, options =>
             {
-                if (!Native.IsWindow(handle)) throw new InvalidOperationException("対象Excelを確認できません。");
+                if (!Native.IsWindow(root)) throw new InvalidOperationException("対象Excelを確認できません。");
                 // 新しいブックだけはモーダル画面が閉じてから作る。
                 if (options.Destination == ImportDestination.NewBook) return null;
                 return Import(com, app, window, dialog!.Tables, options);
@@ -116,8 +127,9 @@ internal static class ExcelTabularInserter
                 optionsToWrite = options;
                 preparedTables = dialog.Tables;
                 dialogResult = dialog.Result;
-                var encodings = inputSelection!.Selected.Select(f => f.Encoding).Distinct().ToArray();
-                profile = dialog.CreateDropProfile(encodings.Length == 1 ? encodings[0] : TableEncoding.Auto, encodings.Length > 1);
+                profile = dialog.CreateDropProfile();
+                if (destination == profile.Destination && !(saved.Destination == ImportDestination.AppendSameSheet && profile.Rows?.Merge == true))
+                    profile = profile with { Destination = saved.Destination };
             }
             var result = optionsToWrite.Destination == ImportDestination.NewBook ? ImportWithoutDialog(preparedTables, optionsToWrite) : dialogResult;
             if (result is null) return null;
@@ -131,6 +143,21 @@ internal static class ExcelTabularInserter
             return result;
         }
         finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); }
+    }
+
+    static bool IsCell(ComScope com, object sourceWindow, Point point)
+    {
+        dynamic window = sourceWindow;
+        try
+        {
+            object? hit = window.RangeFromPoint(point.X, point.Y);
+            if (hit is null) return false;
+            dynamic cell = com.Own(hit), rows = com.Own(cell.Rows), columns = com.Own(cell.Columns);
+            return (int)rows.Count == 1 && (int)columns.Count == 1;
+        }
+        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { return false; }
+        catch (COMException ex) when (ex.HResult is unchecked((int)0x80020003) or unchecked((int)0x80020006) or unchecked((int)0x800A03EC))
+        { return false; }
     }
 
     internal static ExcelPictureInserter.Result ImportOutsideDialog(ComScope com, object application, object sourceWindow,

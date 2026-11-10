@@ -30,6 +30,36 @@ internal static partial class Program
         Check(Native.IsWindowEnabled(handle) == enabled, "外側の処理終了で実Excelの操作状態を復元する");
     }
 
+    static void HiddenBookExcelTests(ComScope com, dynamic window, dynamic sheet)
+    {
+        dynamic app = com.Own(window.Application), books = com.Own(app.Workbooks);
+        dynamic hidden = com.Own(books.Add(-4167)), hiddenWindow = com.Own(hidden.Windows.Item(1));
+        dynamic addIn = com.Own(books.Add(-4167));
+        try
+        {
+            addIn.IsAddin = true;
+            hiddenWindow.Visible = false;
+            sheet.Activate();
+            using var target = new ExcelTargetEditor(com, window);
+            var choices = (ComboBox)target.Controls.Find("TargetBook", true).Single();
+            Check(!choices.Items.Contains((string)hidden.Name) && !choices.Items.Contains((string)addIn.Name)
+                && !ExcelTargetEditor.VisibleWindows(com, (object)addIn).Any(), "アドインと非表示ブックを展開先・ロック対象に含めない");
+            using var locks = new ExcelDropLocks();
+            TabularData[] data = [new("hidden-book.csv", [["値"], ["001"]])];
+            var options = new TabularImportOptions(ImportDestination.NewBook, [[ColumnType.TextFormat]], true);
+            int countBefore = (int)books.Count;
+            ExcelTabularInserter.ImportOutsideDialog(com, app, window, data, options, locks);
+            dynamic created = com.Own(books.Item(countBefore + 1));
+            try
+            {
+                Check((bool)app.Interactive && !(bool)hiddenWindow.Visible && (bool)addIn.IsAddin,
+                    "非表示ブックとアドインが存在しても新規取込後にExcelの操作状態を復元する");
+            }
+            finally { created.Close(false); }
+        }
+        finally { addIn.IsAddin = false; addIn.Close(false); hidden.Close(false); }
+    }
+
     static void NewBookModalExcelTests(ComScope com, dynamic window, dynamic sheet)
     {
         sheet.Activate();

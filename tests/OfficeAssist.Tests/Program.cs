@@ -47,6 +47,7 @@ internal static partial class Program
             if (args.Contains("--preview-final-check")) { PreviewPerformanceTests(); FormattedPreviewExcelTests(); FormattedPreviewFormTests(); }
             DropTests();
             DropTimingTests();
+            TabularDropZoneTests();
             DropDialogTests(output);
             TabularTests(output);
             ImportSelectionTests();

@@ -5,7 +5,10 @@ internal sealed class DropOverlay : BrandedForm
     internal event Func<string[], Point, int, bool>? FilesDropped;
     internal event Action? Rejected;
     internal bool Receiving => pendingFiles is not null;
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal Rectangle ImageBounds { get; set; }
     string[]? pendingFiles;
+    bool tables;
 
     internal DropOverlay()
     {
@@ -21,26 +24,30 @@ internal sealed class DropOverlay : BrandedForm
         {
             pendingFiles = ExcelDropData.Read(e.Data, e.AllowedEffect);
             if (pendingFiles is not null)
-                e.Effect = DragDropEffects.Copy;
+            {
+                tables = !ImageFiles.Accepts(pendingFiles);
+                e.Effect = CanDrop(e) ? DragDropEffects.Copy : DragDropEffects.None;
+            }
             else { e.Effect = DragDropEffects.None; pendingFiles = null; Rejected?.Invoke(); }
         };
-        DragOver += (_, e) => e.Effect = pendingFiles is not null && (e.AllowedEffect & DragDropEffects.Copy) != 0
-            ? DragDropEffects.Copy : DragDropEffects.None;
+        DragOver += (_, e) => e.Effect = CanDrop(e) ? DragDropEffects.Copy : DragDropEffects.None;
         DragLeave += (_, _) => Reset();
         DragDrop += (_, e) =>
         {
             var files = pendingFiles;
-            pendingFiles = null;
             try
             {
                 e.Effect = DragDropEffects.None;
-                if (files is not null && (e.AllowedEffect & DragDropEffects.Copy) != 0
+                if (files is not null && CanDrop(e)
                     && FilesDropped?.Invoke(files, new Point(e.X, e.Y), e.KeyState) == true)
                     e.Effect = DragDropEffects.Copy;
             }
             finally { Reset(); }
         };
     }
+
+    bool CanDrop(DragEventArgs e) => pendingFiles is not null && (e.AllowedEffect & DragDropEffects.Copy) != 0
+        && (tables || ImageBounds.Contains(e.X, e.Y));
 
     internal void Reset()
     {

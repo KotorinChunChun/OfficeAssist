@@ -17,11 +17,32 @@ internal sealed class ExcelTargetEditor : FlowLayoutPanel
     internal ExcelTargetEditor(ComScope com, dynamic window)
     {
         this.com = com; app = com.Own(window.Application); AutoSize = true; WrapContents = true;
-        dynamic application = app, allBooks = com.Own(application.Workbooks), sourceSheet = com.Own(window.ActiveSheet), sourceBook = com.Own(sourceSheet.Parent), selected = com.Own(window.RangeSelection);
-        for (int i = 1; i <= (int)allBooks.Count; i++) { dynamic book = com.Own(allBooks.Item(i)); bookIds.Add((string)book.FullName); books.Items.Add((string)book.Name); }
+        dynamic application = app, allBooks = com.Own(application.Workbooks);
+        for (int i = 1; i <= (int)allBooks.Count; i++)
+        {
+            dynamic book = com.Own(allBooks.Item(i));
+            if (!VisibleWindows(com, (object)book).Any()) continue;
+            bookIds.Add((string)book.FullName);
+            books.Items.Add((string)book.Name);
+        }
         Controls.AddRange([Label("ブック"), books, plannedBook, Label("シート"), sheets, plannedSheet, Label("セル"), address, plannedCell]);
         books.SelectedIndexChanged += (_, _) => { try { LoadSheets(); } catch (Exception ex) { sheets.Items.Clear(); MessageBox.Show(FindForm(), ex.Message, WindowTitle.Create("出力先"), MessageBoxButtons.OK, MessageBoxIcon.Warning); } };
-        books.SelectedIndex = bookIds.IndexOf((string)sourceBook.FullName); sheets.SelectedItem = (string)sourceSheet.Name; address.Text = ExcelAddress.Display(selected);
+        if (bookIds.Count > 0)
+        {
+            object? active = window.ActiveSheet;
+            if (active is not null)
+            {
+                dynamic sourceSheet = com.Own(active), sourceBook = com.Own(sourceSheet.Parent);
+                books.SelectedIndex = bookIds.IndexOf((string)sourceBook.FullName);
+                if (books.SelectedIndex >= 0 && sheets.Items.Contains((string)sourceSheet.Name))
+                {
+                    sheets.SelectedItem = (string)sourceSheet.Name;
+                    object? selected = window.RangeSelection;
+                    if (selected is not null) address.Text = ExcelAddress.Display(com.Own(selected));
+                }
+            }
+            if (books.SelectedIndex < 0) books.SelectedIndex = 0;
+        }
         books.SelectedIndexChanged += (_, _) => Changed?.Invoke(); sheets.SelectedIndexChanged += (_, _) => Changed?.Invoke(); address.TextChanged += (_, _) => Changed?.Invoke();
     }
     static Label Label(string text) => new() { Text = text, AutoSize = true, Padding = new(0, 5, 0, 0) };
@@ -35,9 +56,21 @@ internal sealed class ExcelTargetEditor : FlowLayoutPanel
     }
     internal void LockCurrentWindows()
     {
-        if (books.SelectedIndex < 0) return;
-        dynamic application = app, book = ExcelImportEngine.ResolveBook(com, application, null, bookIds[books.SelectedIndex]), windows = com.Own(book.Windows);
-        for (int i = 1; i <= (int)windows.Count; i++) { dynamic window = com.Own(windows.Item(i)); TargetWindowChanged?.Invoke((nint)(int)window.Hwnd); }
+        if (books.SelectedIndex < 0 || TargetWindowChanged is null) return;
+        dynamic application = app;
+        object book = ExcelImportEngine.ResolveBook(com, application, null, bookIds[books.SelectedIndex]);
+        foreach (dynamic window in VisibleWindows(com, book)) TargetWindowChanged((nint)(int)window.Hwnd);
+    }
+    internal static IEnumerable<object> VisibleWindows(ComScope com, object workbook)
+    {
+        dynamic book = workbook;
+        if ((bool)book.IsAddin) yield break;
+        dynamic windows = com.Own(book.Windows);
+        for (int i = 1; i <= (int)windows.Count; i++)
+        {
+            dynamic window = com.Own(windows.Item(i));
+            if ((bool)window.Visible) yield return window;
+        }
     }
     internal void SetMode(ImportDestination mode)
     {

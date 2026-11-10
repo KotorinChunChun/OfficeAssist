@@ -24,6 +24,23 @@ internal static partial class Program
         }
         string utf8 = Path.GetFullPath(Path.Combine(root, "valid/01-utf8-bom.csv"));
         string tsv = Path.GetFullPath(Path.Combine(root, "valid/02-utf8-no-bom.tsv"));
+        string cp932 = Path.GetFullPath(Path.Combine(root, fixtures.First(f => f.Auto && f.Encoding == TableEncoding.Cp932).RelativePath));
+        string settings = Path.Combine(output, "legacy-encoding-profile.json");
+        TabularDropSettings.Save(new(Encoding: TableEncoding.Utf16Be, MixedEncoding: true), settings);
+        var nextDrop = TabularDropSettings.Load(settings).ForNewDrop(null);
+        using (var batch = ReceivedTabularBatch.Capture([tsv, cp932]))
+        {
+            var paths = new[] { tsv, cp932 };
+            var files = paths.Select(p => new InputCandidate(p, new FileInfo(p).Length, File.GetLastWriteTimeUtc(p)) { Encoding = nextDrop.Encoding }).ToArray();
+            var imported = batch.Read(files, default);
+            try
+            {
+                Check(!nextDrop.MixedEncoding && imported[0].DetectedEncoding == "utf-8" && imported[1].DetectedEncoding == "shift_jis"
+                    && imported.All(t => t.Rows[1][1] == "日本語"), "保存済みUTF-16 BEを次回に適用せず、BOMなしTSVとCP932を一括で個別判定する");
+                Reject(() => batch.Read([files[0] with { Encoding = TableEncoding.Utf16Be }], default), "手動指定は現在の入力だけに適用する");
+            }
+            finally { foreach (var table in imported) table.Rows.Dispose(); }
+        }
         Reject(() => TabularFiles.Read([utf8], encoding: TableEncoding.Cp932), "BOMと手動指定が異なる場合は置換せず拒否する");
         Reject(() => TabularFiles.Read([Path.Combine(root, "reject/17-invalid-utf8.csv")], encoding: TableEncoding.Utf8), "不正UTF-8バイトを置換文字にせず拒否する");
         Reject(() => TabularFiles.Read([Path.Combine(root, "reject/18-empty.csv")]), "空ファイルを取り込まない");

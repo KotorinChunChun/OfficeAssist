@@ -39,7 +39,7 @@ internal static partial class Program
         Check(explorerDialog.Controls.Find("LinkedPictureOption", true).Single().Enabled,
             "Explorerの既存リンク挿入を維持");
 
-        using var overlay = new DropOverlay();
+        using var overlay = new DropOverlay { ImageBounds = new(0, 0, 100, 100) };
         ReceivedImageBatch? accepted = null;
         bool accept = false;
         int keysAtDrop = -1;

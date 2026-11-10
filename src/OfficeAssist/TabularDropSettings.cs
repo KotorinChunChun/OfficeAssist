@@ -10,6 +10,10 @@ internal sealed record TabularDropProfile(ImportDestination Destination = Import
     TableTransformOptions? Rows = null, PreviewMode Preview = PreviewMode.First10, bool ApplyToAll = false,
     TableEncoding Encoding = TableEncoding.Auto, SavedTableColumns[]? Columns = null, bool MixedEncoding = false)
 {
+    // 文字コードの手動指定は、その取り込みの入力ファイルだけに適用する。
+    internal TabularDropProfile ForNewDrop(ImportDestination? destination) =>
+        this with { Destination = destination ?? Destination, Encoding = TableEncoding.Auto, MixedEncoding = false };
+
     internal PreparedTabularDrop Prepare(IReadOnlyList<TabularData> source, CancellationToken token = default, bool strict = true)
     {
         if (strict && MixedEncoding) throw new InvalidDataException("前回の文字コードがファイルごとに異なります。取り込み画面で指定してください。");

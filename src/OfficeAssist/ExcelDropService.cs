@@ -59,8 +59,9 @@ internal sealed class ExcelDropService : IDisposable
             if (!Native.IsWindow(target) || !Native.IsWindowVisible(target) || !overlay.Bounds.Contains(point)) overlay.Reset();
             return;
         }
-        target = Native.ExcelSheetAt(point);
+        target = Native.ExcelRootAt(point);
         if (target == 0 || !Native.GetWindowRect(target, out var rect)) return;
+        overlay.ImageBounds = Native.VisibleExcelSheet(target, point).Bounds;
         overlay.Bounds = rect.Bounds;
         overlay.Show();
     }
@@ -92,8 +93,15 @@ internal sealed class ExcelDropService : IDisposable
             using var receivedTables = tables;
             try
             {
-                var result = tables is not null ? ExcelTabularInserter.Insert(handle, point, tables, showOptions)
-                    : ExcelPictureInserter.InsertInteractive(handle, point, received!.Images, received.Originals, allowLinks, showOptions);
+                if (Native.ExcelRootAt(point) != handle)
+                {
+                    report("ドロップ先のExcelを確認できません。対象のExcelを表示して、再度ドロップしてください。", true);
+                    return;
+                }
+                var sheet = Native.VisibleExcelSheet(handle, point);
+                if (tables is null && !sheet.Bounds.Contains(point)) return;
+                var result = tables is not null ? ExcelTabularInserter.Insert(handle, sheet, point, tables, showOptions)
+                    : ExcelPictureInserter.InsertInteractive(sheet.Handle, point, received!.Images, received.Originals, allowLinks, showOptions);
                 if (result is not null)
                 {
                     report(result.Warning is null ? result.Message : result.Message + Environment.NewLine + result.Warning, false);

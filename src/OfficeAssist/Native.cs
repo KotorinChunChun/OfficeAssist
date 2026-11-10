@@ -15,6 +15,7 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern nint GetAncestor(nint hwnd, uint flags);
     [DllImport("user32.dll")] internal static extern nint GetParent(nint hwnd);
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(nint hwnd, out Rect rect);
+    [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(nint hwnd);
     [DllImport("user32.dll")] internal static extern bool IsWindowVisible(nint hwnd);
     [DllImport("user32.dll")] internal static extern bool IsWindowEnabled(nint hwnd);
     [DllImport("user32.dll")] internal static extern bool EnableWindow(nint hwnd, bool enabled);
@@ -48,15 +49,26 @@ internal static class Native
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
     }
 
-    internal static nint ExcelSheetAt(Point point)
+    internal static nint ExcelRootAt(Point point)
     {
-        var hwnd = WindowFromPoint(point);
-        for (int depth = 0; hwnd != 0 && depth < 12; depth++, hwnd = GetParent(hwnd))
+        nint root = GetAncestor(WindowFromPoint(point), 2);
+        return IsUsableExcelRoot(root) ? root : 0;
+    }
+
+    internal static bool IsUsableExcelRoot(nint root) => root != 0 && IsWindowVisible(root)
+        && IsWindowEnabled(root) && ClassName(root) == "XLMAIN";
+
+    internal static (nint Handle, Rectangle Bounds) VisibleExcelSheet(nint root, Point point)
+    {
+        (nint Handle, Rectangle Bounds) sheet = default;
+        EnumChildWindows(root, (child, _) =>
         {
-            if (ClassName(hwnd) != "EXCEL7") continue;
-            var root = GetAncestor(hwnd, 2);
-            return ClassName(root) == "XLMAIN" && IsWindowEnabled(root) && IsWindowVisible(hwnd) ? hwnd : 0;
-        }
-        return 0;
+            if (ClassName(child) != "EXCEL7" || !IsWindowVisible(child) || !GetWindowRect(child, out var rect)) return true;
+            Rectangle bounds = rect.Bounds;
+            if (bounds.Width <= 0 || bounds.Height <= 0) return true;
+            if (sheet.Handle == 0 || bounds.Contains(point)) sheet = (child, bounds);
+            return !bounds.Contains(point);
+        }, 0);
+        return sheet;
     }
 }

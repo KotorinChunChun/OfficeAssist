@@ -39,6 +39,7 @@ internal static partial class Program
                 TabularFormatExcelTests(com, window, sheet);
                 TabularModalExcelTests(com, window, sheet);
                 NewBookModalExcelTests(com, window, sheet);
+                HiddenBookExcelTests(com, window, sheet);
                 V3ExcelTests(com, window, sheet);
                 V22FixtureExcelTests(com, window, sheet, output);
                 DropDialogExcelTests(com, window, sheet);

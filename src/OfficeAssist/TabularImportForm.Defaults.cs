@@ -3,10 +3,10 @@ namespace OfficeAssist;
 internal sealed partial class TabularImportForm
 {
     TabularDropProfile? pendingDefaults;
-    internal TabularDropProfile CreateDropProfile(TableEncoding encoding = TableEncoding.Auto, bool mixedEncoding = false) => new(
+    internal TabularDropProfile CreateDropProfile() => new(
         (ImportDestination)destination.SelectedIndex, headerEdited ? selection.Header : null,
         new((int)skipFirst.Value, (int)skipLast.Value, dropEmpty.Checked, merge.Checked, merge.Checked && mergeBy.SelectedIndex == 1),
-        (PreviewMode)previewMode.SelectedIndex, applyToAll.Checked, encoding, selection.ExportColumns(), mixedEncoding);
+        (PreviewMode)previewMode.SelectedIndex, applyToAll.Checked, Columns: selection.ExportColumns());
 
     void RestoreDefaultColumns()
     {
