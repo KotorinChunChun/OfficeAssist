@@ -82,6 +82,10 @@ internal static class ExcelTabularInserter
             targets.TargetWindowChanged = locks.LockExisting;
             targets.LockCurrentWindows();
             var previewContext = new ExcelPreviewContextCache(window);
+            TabularImportOptions optionsToWrite;
+            IReadOnlyList<TabularData> preparedTables;
+            ExcelPictureInserter.Result? dialogResult;
+            TabularDropProfile profile;
             TabularImportForm? dialog = null;
             using (dialog = new TabularImportForm(sources, options =>
             {
@@ -109,18 +113,22 @@ internal static class ExcelTabularInserter
             }, previewContext: previewContext.Capture, defaults: defaults))
             {
                 if (dialog.ShowDialog(owner) != DialogResult.OK || dialog.Options is not { } options) return null;
-                var result = options.Destination == ImportDestination.NewBook ? ImportWithoutDialog(dialog.Tables, options) : dialog.Result;
-                if (result is null) return null;
+                optionsToWrite = options;
+                preparedTables = dialog.Tables;
+                dialogResult = dialog.Result;
                 var encodings = inputSelection!.Selected.Select(f => f.Encoding).Distinct().ToArray();
-                try { TabularDropSettings.Save(dialog.CreateDropProfile(encodings.Length == 1 ? encodings[0] : TableEncoding.Auto, encodings.Length > 1)); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-                {
-                    string warning = "取り込みは完了しましたが、次回の設定を保存できませんでした。 " + ex.Message;
-                    MessageBox.Show(owner, warning, WindowTitle.Create("CSV・TSVの取り込み"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return result with { Warning = warning };
-                }
-                return result;
+                profile = dialog.CreateDropProfile(encodings.Length == 1 ? encodings[0] : TableEncoding.Auto, encodings.Length > 1);
             }
+            var result = optionsToWrite.Destination == ImportDestination.NewBook ? ImportWithoutDialog(preparedTables, optionsToWrite) : dialogResult;
+            if (result is null) return null;
+            try { TabularDropSettings.Save(profile); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                string warning = "取り込みは完了しましたが、次回の設定を保存できませんでした。 " + ex.Message;
+                MessageBox.Show(owner, warning, WindowTitle.Create("CSV・TSVの取り込み"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return result with { Warning = warning };
+            }
+            return result;
         }
         finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); }
     }
@@ -129,11 +137,11 @@ internal static class ExcelTabularInserter
         IReadOnlyList<TabularData> tables, TabularImportOptions options, ExcelDropLocks locks)
     {
         if (options.Destination == ImportDestination.NewBook) locks.ReleaseAll();
-        return Import(com, application, sourceWindow, tables, options, locks.LockCreated);
+        return Import(com, application, sourceWindow, tables, options, protectNewBook: true);
     }
 
     internal static ExcelPictureInserter.Result Import(ComScope com, dynamic app, object? sourceWindow,
-        IReadOnlyList<TabularData> tables, TabularImportOptions options, Action<nint>? lockCreated = null)
+        IReadOnlyList<TabularData> tables, TabularImportOptions options, bool protectNewBook = false)
     {
         ExcelImportEngine.Validate(tables, options);
         if (options.Destination == ImportDestination.Selection)
@@ -141,6 +149,7 @@ internal static class ExcelTabularInserter
         object? createdBook = null;
         var created = new List<object>();
         bool events = (bool)app.EnableEvents;
+        bool restoreInteraction = false;
         dynamic book;
         try
         {
@@ -149,7 +158,9 @@ internal static class ExcelTabularInserter
             {
                 dynamic books = com.Own(app.Workbooks);
                 createdBook = com.Own(books.Add(-4167));
-                LockCreatedWindows(com, createdBook, lockCreated);
+                // 新規作成後、Excel内で書込み中の入力を制御する。
+                restoreInteraction = protectNewBook && (bool)app.Interactive;
+                if (restoreInteraction) app.Interactive = false;
                 book = createdBook;
                 book.Date1904 = false;
             }
@@ -180,8 +191,12 @@ internal static class ExcelTabularInserter
                 }
             }
             ExcelImportEngine.Execute(com, app, writes, options);
+            if (restoreInteraction)
+            {
+                app.Interactive = true;
+                restoreInteraction = false;
+            }
             dynamic last = writes[^1].Sheet; last.Activate();
-            if (createdBook is not null) LockCreatedWindows(com, createdBook, lockCreated);
             return new($"{tables.Count}ファイルを{(options.Destination == ImportDestination.AppendSameSheet ? "同名のシートに追記しました" : "取り込みました")}（{book.Name}）。");
         }
         catch (Exception ex)
@@ -192,17 +207,10 @@ internal static class ExcelTabularInserter
             finally { app.DisplayAlerts = alerts; }
             throw new InvalidOperationException(restored ? "取り込みに失敗しました。今回作成したブック・シートは取り消しました。 " + ex.Message : "取り込みと取消しに失敗しました。対象ブックを確認してください。", ex);
         }
-        finally { app.EnableEvents = events; }
-    }
-
-    static void LockCreatedWindows(ComScope com, object book, Action<nint>? lockCreated)
-    {
-        if (lockCreated is null) return;
-        dynamic workbook = book, windows = com.Own(workbook.Windows);
-        for (int i = 1; i <= (int)windows.Count; i++)
+        finally
         {
-            dynamic window = com.Own(windows.Item(i));
-            lockCreated((nint)(int)window.Hwnd);
+            try { if (restoreInteraction) app.Interactive = true; }
+            finally { app.EnableEvents = events; }
         }
     }
 

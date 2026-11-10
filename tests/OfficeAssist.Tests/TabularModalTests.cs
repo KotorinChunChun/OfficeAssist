@@ -34,45 +34,66 @@ internal static partial class Program
     {
         sheet.Activate();
         dynamic app = com.Own(window.Application);
+        dynamic books = com.Own(app.Workbooks), otherBook = com.Own(books.Add(-4167));
+        dynamic otherWindow = com.Own(app.ActiveWindow);
         nint sourceHandle = (nint)(int)window.Hwnd;
+        nint otherHandle = (nint)(int)otherWindow.Hwnd;
+        sheet.Activate();
         using var unrelated = new Control();
         nint disabledHandle = unrelated.Handle;
         Native.EnableWindow(disabledHandle, false);
         TabularData[] data = [new("new-book-lock.csv", [["番号"], ["001"]])];
-        foreach (bool inheritedDisabled in new[] { false, true })
+        var options = new TabularImportOptions(ImportDestination.NewBook, [[ColumnType.TextFormat]], true);
+        try
         {
-            nint createdHandle = 0;
-            using (var locks = new ExcelDropLocks())
+            using var locks = new ExcelDropLocks();
+            locks.LockExisting(sourceHandle);
+            locks.LockExisting(otherHandle);
+            locks.LockExisting(disabledHandle);
+            int initialBooks = (int)books.Count;
+            bool? unlockedBeforeCreation = null, interactiveDuringWrite = null;
+            ExcelTabularInserter.ImportOutsideDialog(com, app, window, data, options with
             {
-                locks.LockExisting(sourceHandle);
-                locks.LockExisting(disabledHandle);
-                Action<nint> track = handle =>
+                Progress = stage =>
                 {
-                    if (inheritedDisabled) Native.EnableWindow(handle, false);
-                    locks.LockCreated(handle);
-                    createdHandle = handle;
-                };
-                var options = new TabularImportOptions(ImportDestination.NewBook, [[ColumnType.TextFormat]], true);
-                if (inheritedDisabled) ExcelTabularInserter.Import(com, app, window, data, options, track);
-                else
-                {
-                    bool? unlockedBeforeCreation = null;
-                    options = options with { Progress = _ => unlockedBeforeCreation ??= Native.IsWindowEnabled(sourceHandle) };
-                    ExcelTabularInserter.ImportOutsideDialog(com, app, window, data, options, locks);
-                    dynamic createdWindow = com.Own(app.ActiveWindow);
-                    createdHandle = (nint)(int)createdWindow.Hwnd;
-                    Check(unlockedBeforeCreation == true, "モーダル画面終了後は元のExcelを解除してから新しいブックを作る");
+                    if (stage.Contains("検証中")) unlockedBeforeCreation ??= Native.IsWindowEnabled(sourceHandle) && Native.IsWindowEnabled(otherHandle) && (bool)app.Interactive;
+                    if (stage.Contains("書込み中")) interactiveDuringWrite = (bool)app.Interactive;
                 }
-                Check(createdHandle != 0 && createdHandle != sourceHandle && !Native.IsWindowEnabled(createdHandle), "作成したExcelウィンドウも取り込み中は操作をロックする");
-            }
-            dynamic book = com.Own(app.ActiveWorkbook), resultSheet = com.Own(book.Worksheets.Item(1));
+            }, locks);
+            dynamic book = com.Own(books.Item(initialBooks + 1)), resultSheet = com.Own(book.Worksheets.Item(1));
+            dynamic createdWindow = com.Own(book.Windows.Item(1));
+            nint createdHandle = (nint)(int)createdWindow.Hwnd;
             try
             {
-                Check(Native.IsWindowEnabled(createdHandle) && Native.IsWindowEnabled(sourceHandle) && !Native.IsWindowEnabled(disabledHandle),
-                    inheritedDisabled ? "作成時に無効だった新しいブックを操作可能にして別の無効状態を保持する" : "取り込み終了後に元と新しいブックの操作を戻す");
-                Check((string)resultSheet.Range["A2"].Value2 == "001", "ロックを復元した新しいブックにデータを保持する");
+                Check(unlockedBeforeCreation == true && interactiveDuringWrite == false, "新規作成前に既存ブックを解除し、書込み中だけExcelが入力を止める");
+                Check((bool)app.Interactive && createdHandle != sourceHandle && createdHandle != otherHandle
+                    && Native.IsWindowEnabled(createdHandle) && Native.IsWindowEnabled(sourceHandle) && Native.IsWindowEnabled(otherHandle)
+                    && !Native.IsWindowEnabled(disabledHandle), "新しいブックを開いたまま既存の2ブックも操作可能にする");
+                dynamic sourceCell = com.Own(sheet.Range["A141"]);
+                sourceCell.Value2 = "元のブック";
+                Check((string)sourceCell.Value2 == "元のブック" && (int)books.Count == initialBooks + 1,
+                    "新しいブックを開いたまま元のブックのデータを操作できる");
+                dynamic resultCell = com.Own(resultSheet.Range["A2"]);
+                Check((string)resultCell.Value2 == "001", "新しいブックに書込み結果を保持する");
             }
             finally { book.Close(false); }
+
+            int before = (int)books.Count;
+            using var cancellation = new CancellationTokenSource();
+            locks.LockExisting(sourceHandle);
+            bool failed = false;
+            try
+            {
+                ExcelTabularInserter.ImportOutsideDialog(com, app, window, data, options with
+                {
+                    Cancellation = cancellation.Token,
+                    Progress = stage => { if (stage.Contains("書込み中")) cancellation.Cancel(); }
+                }, locks);
+            }
+            catch (InvalidOperationException ex) when (ex.GetBaseException() is OperationCanceledException) { failed = true; }
+            Check(failed && (int)books.Count == before && (bool)app.Interactive && Native.IsWindowEnabled(sourceHandle) && Native.IsWindowEnabled(otherHandle),
+                "書込み中のキャンセルで新規ブックを取り消し、既存ブックの操作を戻す");
         }
+        finally { otherBook.Close(false); }
     }
 }

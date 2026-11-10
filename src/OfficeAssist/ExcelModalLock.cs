@@ -9,18 +9,13 @@ internal sealed class ExcelModalLock : IDisposable
     readonly bool restoreEnabled;
     readonly uint threadId, processId;
     bool disposed;
-    internal ExcelModalLock(nint window) : this(window, createdHere: false) { }
-    internal static ExcelModalLock ForCreatedWindow(nint window) => new(window, createdHere: true);
-
-    ExcelModalLock(nint window, bool createdHere)
+    internal ExcelModalLock(nint window)
     {
         this.window = window;
         threadId = Native.GetWindowThreadProcessId(window, out processId);
         if (threadId == 0) return;
-        bool enabled = Native.IsWindowEnabled(window);
-        // 今回開いたブックが無効状態を引き継いだ場合も、取り込み終了時に操作できるようにする。
-        restoreEnabled = enabled || createdHere;
-        if (enabled) Native.EnableWindow(window, false);
+        restoreEnabled = Native.IsWindowEnabled(window);
+        if (restoreEnabled) Native.EnableWindow(window, false);
     }
     public void Dispose()
     {
@@ -28,11 +23,6 @@ internal sealed class ExcelModalLock : IDisposable
         disposed = true;
         if (restoreEnabled && IsSameWindow())
             Native.EnableWindow(window, true);
-    }
-
-    internal void KeepDisabled()
-    {
-        if (IsSameWindow() && Native.IsWindowEnabled(window)) Native.EnableWindow(window, false);
     }
 
     bool IsSameWindow() => threadId != 0 && Native.GetWindowThreadProcessId(window, out uint pid) == threadId && pid == processId;
@@ -52,12 +42,6 @@ internal sealed class ExcelDropLocks : IDisposable
     internal void LockExisting(nint window)
     {
         if (!locks.ContainsKey(window)) locks.Add(window, new(window));
-    }
-
-    internal void LockCreated(nint window)
-    {
-        if (locks.TryGetValue(window, out var modalLock)) modalLock.KeepDisabled();
-        else locks.Add(window, ExcelModalLock.ForCreatedWindow(window));
     }
 
     internal void ReleaseAll()
