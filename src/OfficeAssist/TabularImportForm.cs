@@ -52,7 +52,7 @@ internal sealed partial class TabularImportForm : BrandedForm
     IReadOnlyList<TabularData> sources;
     IReadOnlyList<TabularData> tables;
     TabularImportSelection selection;
-    readonly Func<TabularImportOptions, ExcelPictureInserter.Result>? execute;
+    readonly Func<TabularImportOptions, ExcelPictureInserter.Result?>? execute;
     readonly Action<IWin32Window, string, MessageBoxIcon> showMessage;
     readonly ExcelTargetEditor? targets;
     readonly Func<IReadOnlyList<TabularData>?>? reselect;
@@ -80,7 +80,7 @@ internal sealed partial class TabularImportForm : BrandedForm
     internal TabularImportOptions? Options { get; private set; }
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal ExcelPictureInserter.Result? Result { get; private set; }
-    internal TabularImportForm(IReadOnlyList<TabularData> tables, Func<TabularImportOptions, ExcelPictureInserter.Result>? execute = null,
+    internal TabularImportForm(IReadOnlyList<TabularData> tables, Func<TabularImportOptions, ExcelPictureInserter.Result?>? execute = null,
         Action<IWin32Window, string, MessageBoxIcon>? showMessage = null, ExcelTargetEditor? targets = null,
         Func<IReadOnlyList<TabularData>?>? reselect = null, bool defer = false,
         Func<string?, int>? readEncoding = null, Func<string?, TableEncoding, IReadOnlyList<TabularData>?>? reencode = null,

@@ -4,7 +4,7 @@ internal sealed class DropOverlay : BrandedForm
 {
     internal event Func<string[], Point, int, bool>? FilesDropped;
     internal event Action? Rejected;
-    internal bool Receiving { get; private set; }
+    internal bool Receiving => pendingFiles is not null;
     string[]? pendingFiles;
 
     internal DropOverlay()
@@ -19,7 +19,6 @@ internal sealed class DropOverlay : BrandedForm
         AllowDrop = true;
         DragEnter += (_, e) =>
         {
-            Receiving = true;
             pendingFiles = ExcelDropData.Read(e.Data, e.AllowedEffect);
             if (pendingFiles is not null)
                 e.Effect = DragDropEffects.Copy;
@@ -27,19 +26,26 @@ internal sealed class DropOverlay : BrandedForm
         };
         DragOver += (_, e) => e.Effect = pendingFiles is not null && (e.AllowedEffect & DragDropEffects.Copy) != 0
             ? DragDropEffects.Copy : DragDropEffects.None;
-        DragLeave += (_, _) => { Receiving = false; pendingFiles = null; Hide(); };
+        DragLeave += (_, _) => Reset();
         DragDrop += (_, e) =>
         {
             var files = pendingFiles;
-            Receiving = false;
             pendingFiles = null;
-            if (files is not null && (e.AllowedEffect & DragDropEffects.Copy) != 0)
+            try
             {
-                e.Effect = FilesDropped?.Invoke(files, new Point(e.X, e.Y), e.KeyState) == true ? DragDropEffects.Copy : DragDropEffects.None;
+                e.Effect = DragDropEffects.None;
+                if (files is not null && (e.AllowedEffect & DragDropEffects.Copy) != 0
+                    && FilesDropped?.Invoke(files, new Point(e.X, e.Y), e.KeyState) == true)
+                    e.Effect = DragDropEffects.Copy;
             }
-            else e.Effect = DragDropEffects.None;
-            Hide();
+            finally { Reset(); }
         };
+    }
+
+    internal void Reset()
+    {
+        pendingFiles = null;
+        if (Visible) Hide();
     }
 
     protected override bool ShowWithoutActivation => true;

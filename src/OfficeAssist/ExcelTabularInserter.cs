@@ -16,11 +16,18 @@ internal static class ExcelTabularInserter
         try { dynamic cell = hit, rows = com.Own(cell.Rows), columns = com.Own(cell.Columns); if ((int)rows.Count != 1 || (int)columns.Count != 1) throw new InvalidOperationException("見出しではなくセルへドロップしてください。"); }
         catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { throw new InvalidOperationException("ワークシートのセルへドロップしてください。"); }
         var owner = new ExcelWindowOwner(Native.GetAncestor(handle, 2));
-        var locks = new Dictionary<nint, ExcelModalLock> { [owner.Handle] = new(owner.Handle) };
+        using var locks = new ExcelDropLocks();
+        locks.LockExisting(owner.Handle);
         IReadOnlyList<TabularData>? sources = null;
         InputSelection? inputSelection = null;
         try
         {
+            ExcelPictureInserter.Result ImportWithoutDialog(IReadOnlyList<TabularData> tables, TabularImportOptions options)
+            {
+                using var cancellation = new CancellationTokenSource();
+                return ImportOutsideDialog(com, app, window, tables, options with { Cancellation = cancellation.Token,
+                    Progress = _ => { Application.DoEvents(); if ((Native.GetAsyncKeyState(27) & 0x8000) != 0) cancellation.Cancel(); } }, locks);
+            }
             if (received.HasFolders)
             {
                 using var chooser = new FileSelectionForm(received.Inputs) { StartPosition = FormStartPosition.CenterParent };
@@ -54,12 +61,15 @@ internal static class ExcelTabularInserter
                 try
                 {
                     var prepared = defaults.Prepare(sources);
-                    using var cancellation = new CancellationTokenSource();
-                    automatic = Import(com, app, window, prepared.Tables, prepared.Options with { Cancellation = cancellation.Token,
-                        Progress = _ => { Application.DoEvents(); if ((Native.GetAsyncKeyState(27) & 0x8000) != 0) cancellation.Cancel(); } });
+                    automatic = ImportWithoutDialog(prepared.Tables, prepared.Options);
                 }
                 catch (Exception ex)
                 {
+                    if (defaults.Destination == ImportDestination.NewBook)
+                    {
+                        locks.ReleaseAll();
+                        locks.LockExisting(owner.Handle);
+                    }
                     MessageBox.Show(owner, ex.Message + Environment.NewLine + "取り込み設定を確認してください。", WindowTitle.Create("CSV・TSVの取り込み"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 if (automatic is not null)
@@ -69,13 +79,15 @@ internal static class ExcelTabularInserter
                 }
             }
             var targets = new ExcelTargetEditor(com, window);
-            targets.TargetWindowChanged = hwnd => { if (!locks.ContainsKey(hwnd)) locks[hwnd] = new(hwnd); };
+            targets.TargetWindowChanged = locks.LockExisting;
             targets.LockCurrentWindows();
             var previewContext = new ExcelPreviewContextCache(window);
             TabularImportForm? dialog = null;
             using (dialog = new TabularImportForm(sources, options =>
             {
                 if (!Native.IsWindow(handle)) throw new InvalidOperationException("対象Excelを確認できません。");
+                // 新しいブックだけはモーダル画面が閉じてから作る。
+                if (options.Destination == ImportDestination.NewBook) return null;
                 return Import(com, app, window, dialog!.Tables, options);
             }, targets: targets, reselect: () =>
             {
@@ -96,21 +108,32 @@ internal static class ExcelTabularInserter
                 foreach (var table in sources) table.Rows.Dispose(); sources = replacement; inputSelection = next; return replacement;
             }, previewContext: previewContext.Capture, defaults: defaults))
             {
-                if (dialog.ShowDialog(owner) != DialogResult.OK || dialog.Result is null) return null;
+                if (dialog.ShowDialog(owner) != DialogResult.OK || dialog.Options is not { } options) return null;
+                var result = options.Destination == ImportDestination.NewBook ? ImportWithoutDialog(dialog.Tables, options) : dialog.Result;
+                if (result is null) return null;
                 var encodings = inputSelection!.Selected.Select(f => f.Encoding).Distinct().ToArray();
                 try { TabularDropSettings.Save(dialog.CreateDropProfile(encodings.Length == 1 ? encodings[0] : TableEncoding.Auto, encodings.Length > 1)); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
                 {
                     string warning = "取り込みは完了しましたが、次回の設定を保存できませんでした。 " + ex.Message;
                     MessageBox.Show(owner, warning, WindowTitle.Create("CSV・TSVの取り込み"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return dialog.Result with { Warning = warning };
+                    return result with { Warning = warning };
                 }
-                return dialog.Result;
+                return result;
             }
         }
-        finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); foreach (var modalLock in locks.Values.Reverse()) modalLock.Dispose(); }
+        finally { if (sources is not null) foreach (var table in sources) table.Rows.Dispose(); }
     }
-    internal static ExcelPictureInserter.Result Import(ComScope com, dynamic app, object? sourceWindow, IReadOnlyList<TabularData> tables, TabularImportOptions options)
+
+    internal static ExcelPictureInserter.Result ImportOutsideDialog(ComScope com, object application, object sourceWindow,
+        IReadOnlyList<TabularData> tables, TabularImportOptions options, ExcelDropLocks locks)
+    {
+        if (options.Destination == ImportDestination.NewBook) locks.ReleaseAll();
+        return Import(com, application, sourceWindow, tables, options, locks.LockCreated);
+    }
+
+    internal static ExcelPictureInserter.Result Import(ComScope com, dynamic app, object? sourceWindow,
+        IReadOnlyList<TabularData> tables, TabularImportOptions options, Action<nint>? lockCreated = null)
     {
         ExcelImportEngine.Validate(tables, options);
         if (options.Destination == ImportDestination.Selection)
@@ -123,7 +146,13 @@ internal static class ExcelTabularInserter
         {
             app.EnableEvents = false;
             if (options.Destination == ImportDestination.NewBook)
-            { dynamic books = com.Own(app.Workbooks); createdBook = com.Own(books.Add(-4167)); book = createdBook; book.Date1904 = false; }
+            {
+                dynamic books = com.Own(app.Workbooks);
+                createdBook = com.Own(books.Add(-4167));
+                LockCreatedWindows(com, createdBook, lockCreated);
+                book = createdBook;
+                book.Date1904 = false;
+            }
             else book = ExcelImportEngine.ResolveBook(com, app, sourceWindow, options.BookId);
             if ((bool)book.ReadOnly) throw new InvalidOperationException("読み取り専用のブックには書き込めません。");
             List<ExcelImportEngine.Write> writes;
@@ -152,6 +181,7 @@ internal static class ExcelTabularInserter
             }
             ExcelImportEngine.Execute(com, app, writes, options);
             dynamic last = writes[^1].Sheet; last.Activate();
+            if (createdBook is not null) LockCreatedWindows(com, createdBook, lockCreated);
             return new($"{tables.Count}ファイルを{(options.Destination == ImportDestination.AppendSameSheet ? "同名のシートに追記しました" : "取り込みました")}（{book.Name}）。");
         }
         catch (Exception ex)
@@ -163,6 +193,17 @@ internal static class ExcelTabularInserter
             throw new InvalidOperationException(restored ? "取り込みに失敗しました。今回作成したブック・シートは取り消しました。 " + ex.Message : "取り込みと取消しに失敗しました。対象ブックを確認してください。", ex);
         }
         finally { app.EnableEvents = events; }
+    }
+
+    static void LockCreatedWindows(ComScope com, object book, Action<nint>? lockCreated)
+    {
+        if (lockCreated is null) return;
+        dynamic workbook = book, windows = com.Own(workbook.Windows);
+        for (int i = 1; i <= (int)windows.Count; i++)
+        {
+            dynamic window = com.Own(windows.Item(i));
+            lockCreated((nint)(int)window.Hwnd);
+        }
     }
 
     internal static ExcelPictureInserter.Result InsertIntoWindow(ComScope com, dynamic window, IReadOnlyList<TabularData> tables, TabularImportOptions? settings = null)

@@ -4,54 +4,59 @@ internal sealed class ExcelDropService : IDisposable
 {
     readonly System.Windows.Forms.Timer timer = new() { Interval = 15 };
     readonly DropOverlay overlay = new();
+    readonly DropGesture gesture = new();
+    readonly MousePressMonitor? mouse;
     readonly Control dispatcher;
     readonly Action<string, bool> report;
-    bool wasDown, externalSource, suppressed, enabled = true;
+    bool externalSource, suppressed, enabled = true;
     bool allowLinkedImages;
     Point origin;
     nint target;
-    int releasedTicks;
     internal bool Busy { get; private set; }
-    internal bool Enabled { get => enabled; set { enabled = value; if (!value) { suppressed = true; overlay.Hide(); } } }
+    internal bool Enabled { get => enabled; set { enabled = value; if (!value) { suppressed = true; overlay.Reset(); } } }
 
     internal ExcelDropService(Control dispatcher, Action<string, bool> report, bool startTimer = true)
     {
         this.dispatcher = dispatcher;
         this.report = report;
         _ = overlay.Handle;
-        overlay.Rejected += () => { suppressed = true; overlay.Hide(); };
+        overlay.Rejected += () => { suppressed = true; overlay.Reset(); };
         overlay.FilesDropped += QueueInsert;
         timer.Tick += (_, _) => Tick();
-        if (startTimer) timer.Start();
+        if (startTimer)
+        {
+            mouse = new MousePressMonitor(gesture);
+            timer.Start();
+        }
     }
 
     void Tick()
     {
         bool down = (Native.GetAsyncKeyState(1) & 0x8000) != 0;
-        Native.GetCursorPos(out var point);
-        if (down && !wasDown)
+        if (!Native.GetCursorPos(out var point)) { overlay.Reset(); return; }
+        if (gesture.TakePress(down, point, Native.WindowFromPoint) is { } press)
         {
-            origin = point;
-            nint source = Native.WindowFromPoint(point);
-            externalSource = Native.IsExternalImageDragSource(source);
-            allowLinkedImages = externalSource && Native.IsExplorer(source);
+            overlay.Reset();
+            target = 0;
+            origin = press.Position;
+            externalSource = down && Native.IsExternalImageDragSource(press.Source);
+            allowLinkedImages = externalSource && Native.IsExplorer(press.Source);
             suppressed = false;
         }
-        wasDown = down;
+        if ((Native.GetAsyncKeyState(27) & 0x8000) != 0) suppressed = true;
+        if (!enabled || Busy || !externalSource || suppressed)
+        { overlay.Reset(); return; }
         if (!down)
         {
-            // OLE側のDropが先に処理される猶予を持たせる。
-            if (++releasedTicks >= 3) { overlay.Hide(); externalSource = false; }
+            if (!gesture.WaitForDrop(Environment.TickCount64, overlay.Receiving))
+            { overlay.Reset(); externalSource = false; }
             return;
         }
-        releasedTicks = 0;
-        if (!enabled || Busy || !externalSource || suppressed || (Native.GetAsyncKeyState(27) & 0x8000) != 0)
-        { overlay.Hide(); return; }
         if (Math.Abs(point.X - origin.X) < SystemInformation.DragSize.Width
             && Math.Abs(point.Y - origin.Y) < SystemInformation.DragSize.Height) return;
         if (overlay.Visible)
         {
-            if (!Native.IsWindow(target) || !Native.IsWindowVisible(target) || !overlay.Bounds.Contains(point)) overlay.Hide();
+            if (!Native.IsWindow(target) || !Native.IsWindowVisible(target) || !overlay.Bounds.Contains(point)) overlay.Reset();
             return;
         }
         target = Native.ExcelSheetAt(point);
@@ -62,7 +67,7 @@ internal sealed class ExcelDropService : IDisposable
 
     bool QueueInsert(string[] files, Point point, int keyState)
     {
-        if (Busy || !enabled) return false;
+        if (Busy || !enabled || gesture.HasPendingPress) return false;
         suppressed = true;
         var handle = target;
         bool allowLinks = allowLinkedImages;
@@ -80,7 +85,6 @@ internal sealed class ExcelDropService : IDisposable
             or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         { report("ファイルを受け取れませんでした: " + ex.Message, true); return false; }
         Busy = true;
-        overlay.Hide();
         // OLEのDrop呼出中にExcelへCOMを送るとビジーになるため、応答後にUIキューから実行する。
         try { dispatcher.BeginInvoke(new Action(() =>
         {
@@ -110,5 +114,5 @@ internal sealed class ExcelDropService : IDisposable
         return true;
     }
 
-    public void Dispose() { timer.Stop(); timer.Dispose(); overlay.Dispose(); }
+    public void Dispose() { timer.Stop(); timer.Dispose(); mouse?.Dispose(); overlay.Dispose(); }
 }

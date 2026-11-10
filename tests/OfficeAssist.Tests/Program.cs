@@ -28,6 +28,15 @@ internal static partial class Program
         Directory.CreateDirectory(output);
         try
         {
+            if (args.Contains("--drop-timing"))
+            {
+                DropTimingTests();
+                var monitor = new MousePressMonitor(new DropGesture());
+                using (monitor) Check(monitor.Installed, "専用スレッドに押下フックを登録");
+                Check(!monitor.Installed, "終了時に押下フックのスレッドを回収");
+                Console.WriteLine($"PASS: {count}件");
+                return 0;
+            }
             if (args.Contains("--picture-case")) return VerifyPictureCase(args, output);
             if (args.Contains("--manual-preview")) return ManualPreview(args, output);
             if (args.Contains("--create-import-cases")) { var cases = ImportFixtureSet.Create(output); Console.WriteLine($"生成: {cases.Length}ケース → {output}"); return 0; }
@@ -37,6 +46,7 @@ internal static partial class Program
             if (args.Contains("--preview-performance-tests")) { PreviewPerformanceTests(); Console.WriteLine($"PASS: {count}件"); return 0; }
             if (args.Contains("--preview-final-check")) { PreviewPerformanceTests(); FormattedPreviewExcelTests(); FormattedPreviewFormTests(); }
             DropTests();
+            DropTimingTests();
             DropDialogTests(output);
             TabularTests(output);
             ImportSelectionTests();

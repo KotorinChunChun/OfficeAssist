@@ -73,6 +73,12 @@ dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Relea
 
 `--selection-com`は専用の非表示Excelで、既存データとの衝突、新規ブック・新規シート、列形式と引用符の有無を検証します。
 
+ドロップ受付のタイミングは `--drop-timing` で検証します。カーソルの早い移動、解放と押下の連続、遅いOLE通知、キャンセル後の次回受付を試験し、Windowsフックを専用スレッドに登録・解除します。`--selection-com`では新しいブックの作成前に元のロックを解除する順序と、新しいブックへの書込み・操作の復元も確認します。実ドラッグは `--fixture` を使うGUI受入項目です。
+
+```powershell
+dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --drop-timing dev/history/v0.2.2/logs/drop-timing-check
+```
+
 ```powershell
 dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --selection-com dev/history/v0.2.2/logs/column-check
 ```
