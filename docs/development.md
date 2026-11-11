@@ -14,7 +14,7 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj
 
 独自アイコンのマスターは`src/OfficeAssist/assets/OfficeAssist.png`です。`./dev/scripts/build-app-icon.ps1`で正方形マスターの周囲の透明余白を調整し、16～256pxの10サイズを含むICOを再生成できます。
 
-版別結果は[開発資料](../dev/README.md)を参照してください。
+バージョンごとの結果は[開発資料](../dev/README.md)を参照してください。
 
 ## 検証
 
@@ -28,11 +28,11 @@ dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Relea
 ./dev/scripts/Compare-PreviewBenchmarks.ps1 -Before dev/history/v0.2.2/logs/preview-benchmark/run-a/benchmark.json -After dev/history/v0.2.2/logs/preview-benchmark/run-b/benchmark.json -OutputDirectory dev/history/v0.2.2/logs/preview-benchmark/comparison
 ```
 
-改修前後を同じ環境で別々に保存して比較します。元データのみ／書式あり、対象属性なし／あり、検査、推定、行加工・結合、表示行の選択、文字コード自動／手動、繰返し／固有値、日付／不正日付、長文、縦長／横長、初回／小数桁変更を含みます。`features/`は結果キャッシュ・範囲設定・短文文字列経路を無効化する切り分けです。比較スクリプトは共通ケースの条件と結果が違えば失敗します。
+改修前後の測定結果を同じ環境で別々に保存して比較します。元データのみ／書式あり、対象属性なし／あり、検査、推定、行加工・結合、表示行の選択、文字コード自動／手動、繰返し／固有値、日付／不正日付、長文、縦長／横長、初回／小数桁変更を含みます。`features/`では、結果キャッシュ、範囲設定、短い文字列の処理を無効にした場合を測定し、影響を切り分けます。共通ケースの条件と結果が違う場合、比較スクリプトは失敗します。
 
 書式の測定は結果文字列の構築を含みます。`excel/cold-start`だけは専用Excelの起動込み、`form/`は専用Excel起動後の非表示コントロールの構築と表示完了までです。表示結果の再利用が効く反復の中央値と、未登録の値を含む最初の試行を分けて評価してください。`--preview-final-check --selection-com --large-preview`は性能対策の一致・上限・終了処理と既存機能をまとめてCLI確認します。先に大型サンプルを同じ出力先の`files/`へ生成します。GUIの実描画・操作の受入確認は別です。
 
-書式付きプレビューの比較は次のCLIで行います。専用の非表示Excelで実書込みとプレビューのText・Value2・NumberFormat・PrefixCharacterを比較し、取り込み先の列幅、書体、1904年日付方式、地域設定も確認します。後者は画面を表示しないコントロール試験で、形式変更・エラー復帰・全件検査・遅延結果の破棄を確認します。GUIの実描画やドラッグ操作の検証とは区別します。
+書式付きプレビューは次のコマンドで確認します。先に示すコマンドは専用の非表示Excelを使い、実際に書き込んだセルとプレビューのText・Value2・NumberFormat・PrefixCharacterを比較します。取り込み先の列幅、書体、1904年日付方式、地域設定も確認します。続くコマンドは画面を表示せずにコントロールを試験し、形式の変更、エラーからの復帰、全件検査、遅れて届いた結果の破棄を確認します。GUIの実描画やドラッグ操作は別に検証します。
 
 ```powershell
 dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release -- --format-preview-com dev/history/v0.2.2/logs/format-check
@@ -58,7 +58,7 @@ dotnet run --project src/OfficeAssist/OfficeAssist.csproj -c Release -- --import
 
 v0.2.2では`--skip-first N --skip-last N --drop-empty-rows`で各ファイルを加工し、`--merge --merge-by order|name`で結合します。列名結合は`--header yes`が必要です。`--preview none|first10|all`はGUIとの設定比較用で、非表示CLIはプレビューを生成しません。出力の全件読戻しは常に行います。レポートは既定で件数・列形式等のメタデータだけとし、値・書式・PrefixCharacter等のサンプルが必要な場合は`--report-values`を明示します。
 
-`--list-inputs -- C:\path\folder`でフォルダ内の候補と探索エラーをJSON出力します。`--input-list C:\path\selected.json`にはフルパス文字列のJSON配列を取込順で指定できます。`--include-pattern '*2026*.csv'`は対象選択条件として作用します。GUIの検索は表示だけを絞るので用途を区別してください。CLIのフォルダ探索で未解決のエラーがあれば書込みを中止します。
+`--list-inputs -- C:\path\folder`でフォルダ内の候補と探索エラーをJSONで出力します。`--input-list C:\path\selected.json`には、フルパスの文字列を取り込み順に並べたJSON配列を指定できます。`--include-pattern '*2026*.csv'`は取り込む対象を絞ります。GUIの検索で絞るのは一覧表示だけなので、用途に応じて使い分けてください。CLIのフォルダ探索で未解決のエラーがあれば書込みを中止します。
 
 `--list-excel-targets`で実行中ExcelのPID・bookId・シート名を取得できます。既存ブックへのCLI書込みは`--excel-instance PID --book-id ID`を必須とし、`--new-sheet`、`--append-same-sheet`、または`--sheet 名前 --cell B3`で対象を指定します。追記と結合は排他です。試験には専用Excelプロセスと合成データを使用してください。
 
@@ -92,7 +92,7 @@ dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -- --exc
 
 ### サンプル画像の挿入・保存をCLIで検証する
 
-`--excel --picture-case`は指定した試験用`.xlsx`を複製し、指定画像を埋め込みます。専用の非表示Excelで動作し、セル番地から通常の画像配置処理を呼び出します。次の例では、ケースJSONと同じフォルダーに試験ブックと画像を置きます。絶対パスも指定できます。
+`--excel --picture-case`は指定した試験用`.xlsx`を複製し、指定した画像を埋め込みます。専用の非表示Excelで動作し、セル番地から通常の画像配置処理を呼び出します。次の例ではケースJSONと同じフォルダーに試験ブックと画像を置きます。絶対パスも指定できます。
 
 ```json
 {
@@ -115,7 +115,7 @@ dotnet run --project tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Relea
 
 エクスプローラーからの実ドラッグ、修飾キー、ダイアログの表示は、`--fixture`を使うGUI受入項目として別に確認します。
 
-通常試験には、Explorer以外の外部起点、Excel内操作とOfficeAssist自身の除外、Copy可能な画像FileDropの判定、非画像と送信元読取例外の回帰も含みます。実入力・クリップボード・既存Excelは操作しません。PR用に出力を分ける例:
+通常試験ではExplorer以外の外部アプリから始めた操作、Excel内の操作とOfficeAssist自身の除外、Copy可能な画像FileDropの判定を確認します。画像以外の入力と送信元の読み取りで例外が起きる場合の回帰テストも含みます。実入力・クリップボード・既存Excelは操作しません。次のコマンドはPR用に出力を分ける例です。
 
 ```powershell
 dotnet build tests/OfficeAssist.Tests/OfficeAssist.Tests.csproj -c Release --artifacts-path artifacts/external-drop-pr -warnaserror
@@ -131,4 +131,4 @@ dotnet artifacts/external-drop-pr/bin/OfficeAssist.Tests/release/OfficeAssist.Te
 
 ## README用の安全な画面プレビュー
 
-`OfficeAssist.Tests.exe --manual-preview <main|settings|image|table> <専用出力先>` で実フォームを表示する。利用者設定・常駐サービス・実Excelへ接続せず、保存・挿入の確定も製品設定やブックへ書き込まない。画像や表の結果は別途CLIの専用ブックで確認する。テストEXE専用の入口であり、配布EXEの操作ではない。
+`OfficeAssist.Tests.exe --manual-preview <main|settings|image|table> <専用出力先>`で実際のフォームを表示します。利用者設定・常駐サービス・実Excelには接続しません。保存や挿入を確定しても、製品設定やブックには書き込みません。画像や表の結果はCLIで用意した専用ブックで別に確認します。このコマンドはテストEXE専用です。
